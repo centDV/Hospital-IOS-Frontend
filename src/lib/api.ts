@@ -118,6 +118,11 @@ export interface PrescriptionCatalogs {
   routes: Array<{ id: string; name: string }>
 }
 
+export interface LaboratoryTest {
+  id: string
+  name: string
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -423,6 +428,39 @@ export async function issuePrescription(input: {
   if (error) throw error
   if (!isRecord(data) || typeof data.id !== 'string') {
     throw new Error('La receta no devolvió un identificador válido.')
+  }
+}
+
+export async function readLaboratoryTests(): Promise<LaboratoryTest[]> {
+  const rows = await readPublicView('catalog_test_definitions')
+  return parseRows(rows, 'Catálogo de estudios', (row) => {
+    if (typeof row.active !== 'boolean') throw new Error('Catálogo de estudios: campo "active" inválido.')
+    return {
+      id: requiredString(row, 'id', 'Catálogo de estudios'),
+      name: requiredString(row, 'name', 'Catálogo de estudios'),
+      kind: requiredString(row, 'kind', 'Catálogo de estudios'),
+      active: row.active,
+    }
+  }).filter((test) => test.active && test.kind === 'laboratory')
+    .map(({ id, name }) => ({ id, name }))
+}
+
+export async function requestLaboratoryStudy(input: {
+  encounterId: string
+  testId: string
+  instructions: string
+  requestKey: string
+}): Promise<void> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data, error } = await supabase.rpc('doctor_issue_lab_order', {
+    p_encounter: input.encounterId,
+    p_test: input.testId,
+    p_instructions: input.instructions.trim(),
+    p_request_key: input.requestKey,
+  })
+  if (error) throw error
+  if (!isRecord(data) || typeof data.id !== 'string') {
+    throw new Error('La solicitud del estudio no devolvió un identificador válido.')
   }
 }
 

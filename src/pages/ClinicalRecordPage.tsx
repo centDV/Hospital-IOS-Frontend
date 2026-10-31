@@ -3,8 +3,11 @@ import { Icon } from '../components/Icon'
 import {
   createClinicalNote,
   issuePrescription,
+  readLaboratoryTests,
   readPatientChart,
   readPrescriptionCatalogs,
+  requestLaboratoryStudy,
+  type LaboratoryTest,
   type PatientChart,
   type PrescriptionCatalogs,
 } from '../lib/api'
@@ -62,6 +65,7 @@ const statusLabels: Record<string, string> = {
   in_progress: 'En proceso',
   open: 'Abierta',
   ordered: 'Solicitado',
+  pending: 'Pendiente',
   resolved: 'Resuelta',
   signed: 'Firmada',
 }
@@ -256,12 +260,19 @@ export function ClinicalRecordPage({
   const [catalogError, setCatalogError] = useState('')
   const [showPrescriptionForm, setShowPrescriptionForm] = useState(false)
   const [showObservationForm, setShowObservationForm] = useState(false)
+  const [showStudyForm, setShowStudyForm] = useState(false)
   const [prescriptionError, setPrescriptionError] = useState('')
   const [observationError, setObservationError] = useState('')
+  const [studyError, setStudyError] = useState('')
   const [prescriptionSuccess, setPrescriptionSuccess] = useState('')
   const [observationSuccess, setObservationSuccess] = useState('')
+  const [studySuccess, setStudySuccess] = useState('')
   const [savingPrescription, setSavingPrescription] = useState(false)
   const [savingObservation, setSavingObservation] = useState(false)
+  const [savingStudy, setSavingStudy] = useState(false)
+  const [laboratoryTests, setLaboratoryTests] = useState<LaboratoryTest[]>([])
+  const [studyCatalogError, setStudyCatalogError] = useState('')
+  const [study, setStudy] = useState({ testId: '', instructions: '' })
   const [clinicalNote, setClinicalNote] = useState({
     subjective: '',
     objective: '',
@@ -306,10 +317,16 @@ export function ClinicalRecordPage({
   useEffect(() => {
     if (!isDoctor) return
     let active = true
-    readPrescriptionCatalogs().then((result) => {
-      if (active) setCatalogs(result)
+    Promise.all([readPrescriptionCatalogs(), readLaboratoryTests()]).then(([prescriptionResult, tests]) => {
+      if (!active) return
+      setCatalogs(prescriptionResult)
+      setLaboratoryTests(tests)
+      setStudyCatalogError('')
     }).catch((loadError: unknown) => {
-      if (active) setCatalogError(loadError instanceof Error ? loadError.message : 'No se pudieron cargar los catálogos de medicamentos.')
+      if (!active) return
+      const message = loadError instanceof Error ? loadError.message : 'No se pudieron cargar los catálogos clínicos.'
+      setCatalogError(message)
+      setStudyCatalogError(message)
     })
     return () => {
       active = false
@@ -381,6 +398,30 @@ export function ClinicalRecordPage({
     }
   }
 
+  async function submitStudy(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!isRecord(openEncounter)) return
+    setStudyError('')
+    setStudySuccess('')
+    setSavingStudy(true)
+    try {
+      await requestLaboratoryStudy({
+        encounterId: String(openEncounter.id),
+        testId: study.testId,
+        instructions: study.instructions.trim(),
+        requestKey: globalThis.crypto.randomUUID(),
+      })
+      setStudySuccess('Estudio solicitado correctamente.')
+      setStudy({ testId: '', instructions: '' })
+      setShowStudyForm(false)
+      setRefreshVersion((version) => version + 1)
+    } catch (saveError: unknown) {
+      setStudyError(saveError instanceof Error ? saveError.message : 'No se pudo solicitar el estudio.')
+    } finally {
+      setSavingStudy(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <button className="inline-flex items-center gap-2 text-xs font-medium text-[#870b30] hover:underline" onClick={onBack} type="button">
@@ -419,12 +460,13 @@ export function ClinicalRecordPage({
                   </p>
                 </div>
                 {isRecord(openEncounter) && (
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <button className="rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => setShowObservationForm((show) => !show)} type="button">Agregar nota clínica</button>
                     <button className="rounded-md bg-[#870b30] px-3 py-2 text-xs font-medium text-white hover:bg-[#6f0826]" onClick={() => {
                       setPrescription((current) => ({ ...current, startsOn: current.startsOn || getLocalDateInputValue() }))
                       setShowPrescriptionForm((show) => !show)
                     }} type="button">Agregar receta</button>
+                    <button className="rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => setShowStudyForm((show) => !show)} type="button">Solicitar estudio</button>
                   </div>
                 )}
               </div>
@@ -432,6 +474,8 @@ export function ClinicalRecordPage({
               {catalogError && <p className="mt-3 rounded-md bg-rose-50 p-2 text-xs text-rose-800" role="alert">{catalogError}</p>}
               {observationSuccess && <p className="mt-3 rounded-md bg-emerald-50 p-2 text-xs text-emerald-800" role="status">{observationSuccess}</p>}
               {prescriptionSuccess && <p className="mt-3 rounded-md bg-emerald-50 p-2 text-xs text-emerald-800" role="status">{prescriptionSuccess}</p>}
+              {studyCatalogError && <p className="mt-3 rounded-md bg-rose-50 p-2 text-xs text-rose-800" role="alert">{studyCatalogError}</p>}
+              {studySuccess && <p className="mt-3 rounded-md bg-emerald-50 p-2 text-xs text-emerald-800" role="status">{studySuccess}</p>}
 
               {showObservationForm && isRecord(openEncounter) && (
                 <form className="mt-4 space-y-3 border-t border-slate-100 pt-4" onSubmit={(event) => void submitObservation(event)}>
@@ -499,6 +543,22 @@ export function ClinicalRecordPage({
                   </label>
                   {prescriptionError && <p className="text-xs text-rose-700 sm:col-span-2" role="alert">{prescriptionError}</p>}
                   <button className="rounded-md bg-[#870b30] px-3 py-2 text-xs font-medium text-white disabled:opacity-50 sm:col-span-2" disabled={savingPrescription || !catalogs || catalogs.medications.length === 0 || catalogs.units.length === 0 || catalogs.routes.length === 0} type="submit">{savingPrescription ? 'Emitiendo...' : 'Emitir receta'}</button>
+                </form>
+              )}
+
+              {showStudyForm && isRecord(openEncounter) && (
+                <form className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2" onSubmit={(event) => void submitStudy(event)}>
+                  <label className="space-y-1 text-xs font-medium text-slate-700 sm:col-span-2">Estudio
+                    <select className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" onChange={(event) => setStudy({ ...study, testId: event.target.value })} required value={study.testId}>
+                      <option value="">Selecciona un estudio</option>
+                      {laboratoryTests.map((test) => <option key={test.id} value={test.id}>{test.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs font-medium text-slate-700 sm:col-span-2">Indicaciones o pregunta clínica
+                    <textarea className="min-h-20 w-full rounded-md border border-slate-200 px-3 py-2 text-sm" maxLength={10000} onChange={(event) => setStudy({ ...study, instructions: event.target.value })} value={study.instructions} />
+                  </label>
+                  {studyError && <p className="text-xs text-rose-700 sm:col-span-2" role="alert">{studyError}</p>}
+                  <button className="rounded-md bg-[#870b30] px-3 py-2 text-xs font-medium text-white disabled:opacity-50 sm:col-span-2" disabled={savingStudy || laboratoryTests.length === 0} type="submit">{savingStudy ? 'Solicitando...' : 'Enviar solicitud de estudio'}</button>
                 </form>
               )}
             </section>

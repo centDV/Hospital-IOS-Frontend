@@ -30,6 +30,17 @@ function isSex(value: string): value is 'female' | 'male' | 'intersex' | 'unknow
   return value === 'female' || value === 'male' || value === 'intersex' || value === 'unknown'
 }
 
+function sexLabel(sex: string | null): string {
+  if (!sex) return 'No especificado'
+  const labels: Record<string, string> = {
+    female: 'Femenino',
+    intersex: 'Intersexual',
+    male: 'Masculino',
+    unknown: 'No especificado',
+  }
+  return labels[sex.trim().toLowerCase()] ?? sex
+}
+
 function isAdmissionType(value: string): value is 'emergency' | 'scheduled' | 'observation' {
   return value === 'emergency' || value === 'scheduled' || value === 'observation'
 }
@@ -304,7 +315,7 @@ export function PatientsPage({ onViewChart }: { onViewChart: (patientId: string,
                       <td className="py-3 font-semibold text-[#870b30]">{patient.medicalRecordNumber}</td>
                       <td className="py-3 font-medium text-slate-700">{patient.givenNames} {patient.familyNames}</td>
                       <td className="py-3 text-slate-500">{patient.birthDate ?? 'No registrado'}</td>
-                      <td className="py-3 text-slate-500">{patient.administrativeSex ?? 'No especificado'}</td>
+                      <td className="py-3 text-slate-500">{sexLabel(patient.administrativeSex)}</td>
                       <td className="py-3"><button className="font-medium text-[#870b30] hover:underline disabled:opacity-50" disabled={accessLoading || Boolean(accessError)} onClick={() => onViewChart(patient.id, isDoctor)} type="button">Ver expediente</button></td>
                       {showWriteActions && <td className="py-3"><button className="font-medium text-[#870b30] hover:underline" onClick={() => openAdmissionForm(patient.id)} type="button">Registrar ingreso</button></td>}
                     </tr>

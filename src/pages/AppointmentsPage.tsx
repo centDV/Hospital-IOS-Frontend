@@ -61,6 +61,7 @@ function statusLabel(status: string): string {
     completed: 'Atendida',
     cancelled: 'Cancelada',
     no_show: 'No asistió',
+    pending: 'Pendiente',
   }
   return labels[status] ?? status.replaceAll('_', ' ')
 }
