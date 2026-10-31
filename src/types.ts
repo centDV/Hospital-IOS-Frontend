@@ -31,3 +31,8 @@ export type IconName =
   | 'arrow'
   | 'clock'
   | 'check'
+  | 'mail'
+  | 'lock'
+  | 'eye'
+  | 'eyeOff'
+  | 'arrowRight'

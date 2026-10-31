@@ -16,6 +16,19 @@ export function PageHeading({ page }: { page: Page }) {
     'Reportes y Analítica': 'Indicadores estratégicos, estadísticas clínicas y reportes de gestión hospitalaria.',
     'Configuración': 'Personaliza el sistema, protege la información y gestiona preferencias institucionales.',
   }
+  if (page === 'Resumen general') {
+    return (
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-[#870b30] sm:text-2xl">Tablero General del Hospital Universitario</h1>
+          <p className="mt-1 text-xs text-slate-500">{descriptions[page]}</p>
+        </div>
+        <p className="text-[10px] text-slate-400">
+          Hoy · Vista operativa
+        </p>
+      </div>
+    )
+  }
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>

@@ -8,7 +8,17 @@ export function Topbar({
   session: Session
   onSignOut: () => Promise<void>
 }) {
-  const initials = session.user.email?.slice(0, 2).toUpperCase() ?? 'HU'
+  const displayName = typeof session.user.user_metadata.display_name === 'string'
+    ? session.user.user_metadata.display_name.trim()
+    : ''
+  const givenNames = typeof session.user.user_metadata.given_names === 'string'
+    ? session.user.user_metadata.given_names.trim()
+    : ''
+  const familyNames = typeof session.user.user_metadata.family_names === 'string'
+    ? session.user.user_metadata.family_names.trim()
+    : ''
+  const userName = displayName || `${givenNames} ${familyNames}`.trim() || session.user.email || 'Usuario'
+  const initials = userName.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'HU'
 
   return (
     <header className="flex min-h-[64px] flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-4 py-3 sm:px-7">
@@ -26,10 +36,10 @@ export function Topbar({
         <div className="flex items-center gap-2 border-l border-slate-100 pl-3">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f8e9ef] text-[10px] font-semibold text-[#800b2c]">{initials}</span>
           <span className="hidden sm:block">
-            <span className="block text-[11px] font-semibold text-slate-800">{session.user.email}</span>
+            <span className="block max-w-48 truncate text-[11px] font-semibold text-slate-800" title={userName}>{userName}</span>
             <span className="block text-[10px] text-slate-400">Sesión autenticada</span>
           </span>
-          <button aria-label="Cerrar sesión" className="ml-1 text-[10px] font-medium text-slate-500 hover:text-[#870b30]" onClick={() => void onSignOut()} type="button">Salir</button>
+          <button aria-label="Cerrar sesión" className="ml-1 whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-[#870b30] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#870b30]" onClick={() => void onSignOut()} type="button">Salir</button>
         </div>
       </div>
     </header>
