@@ -1,9 +1,50 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Panel } from '../components/ui'
+import { readPublicView } from '../lib/api'
+
+interface Facility {
+  id: string
+  name: string
+  address: string | null
+  active: boolean
+}
+
+interface Department {
+  id: string
+  facilityId: string
+  name: string
+  active: boolean
+}
+
+function parseCatalogRows<T>(rows: Record<string, unknown>[], viewName: string, parse: (row: Record<string, unknown>) => T): T[] {
+  return rows.map((row) => {
+    try {
+      return parse(row)
+    } catch (error) {
+      throw new Error(`La vista "${viewName}" devolvió datos inválidos.`, { cause: error })
+    }
+  })
+}
+
+function requiredString(row: Record<string, unknown>, key: string): string {
+  const value = row[key]
+  if (typeof value !== 'string') throw new Error(`Falta el campo "${key}".`)
+  return value
+}
+
+function requiredBoolean(row: Record<string, unknown>, key: string): boolean {
+  const value = row[key]
+  if (typeof value !== 'boolean') throw new Error(`Falta el campo "${key}".`)
+  return value
+}
 
 export function ConfigurationPage() {
   const [saved, setSaved] = useState(false)
   const [theme, setTheme] = useState('Claro')
+  const [facilities, setFacilities] = useState<Facility[]>([])
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(true)
+  const [catalogError, setCatalogError] = useState('')
   const [notifications, setNotifications] = useState<Record<string, boolean>>({
     'Alertas de nuevos ingresos': true,
     'Resultados de laboratorio': true,
@@ -11,6 +52,39 @@ export function ConfigurationPage() {
     'Avisos de inventario crítico': true,
     'Reportes programados': false,
   })
+
+  useEffect(() => {
+    let active = true
+
+    Promise.all([
+      readPublicView('catalog_facilities').then((rows) => parseCatalogRows(rows, 'catalog_facilities', (row) => ({
+        id: requiredString(row, 'id'),
+        name: requiredString(row, 'name'),
+        address: typeof row.address === 'string' ? row.address : null,
+        active: requiredBoolean(row, 'active'),
+      }))),
+      readPublicView('catalog_departments').then((rows) => parseCatalogRows(rows, 'catalog_departments', (row) => ({
+        id: requiredString(row, 'id'),
+        facilityId: requiredString(row, 'facility_id'),
+        name: requiredString(row, 'name'),
+        active: requiredBoolean(row, 'active'),
+      }))),
+    ]).then(([nextFacilities, nextDepartments]) => {
+      if (!active) return
+      setFacilities(nextFacilities)
+      setDepartments(nextDepartments)
+    }).catch((error: unknown) => {
+      if (!active) return
+      setCatalogError(error instanceof Error ? error.message : 'No se pudieron cargar los catálogos de Supabase.')
+    }).finally(() => {
+      if (active) setCatalogLoading(false)
+    })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   const toggleNotification = (name: string) => {
     setNotifications((current) => ({ ...current, [name]: !current[name] }))
     setSaved(false)
@@ -54,6 +128,35 @@ export function ConfigurationPage() {
             <p className="text-[8px] leading-relaxed text-slate-400 sm:col-span-2 lg:col-span-4">Los cambios operativos se aplicarán a los módulos que utilizan estos parámetros.</p>
             <div className="flex justify-end sm:col-span-2 lg:col-span-4"><button className="rounded-md bg-[#870b30] px-3 py-2 text-[9px] font-semibold text-white hover:bg-[#6f0827]" type="submit">Guardar parámetros</button></div>
           </form>
+        </Panel>
+        <Panel className="xl:col-span-12" subtitle="Lectura autenticada desde vistas públicas protegidas por RLS" title="Instituciones y departamentos conectados">
+          {catalogLoading && <p className="text-[9px] text-slate-500">Cargando catálogos de Supabase...</p>}
+          {catalogError && <p className="rounded-md bg-rose-50 px-3 py-2 text-[9px] text-rose-800" role="alert">{catalogError}</p>}
+          {!catalogLoading && !catalogError && facilities.length === 0 && <p className="text-[9px] text-slate-500">No hay instituciones disponibles para esta cuenta.</p>}
+          {!catalogLoading && !catalogError && facilities.length > 0 && (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {facilities.map((facility) => {
+                const facilityDepartments = departments.filter((department) => department.facilityId === facility.id)
+                return (
+                  <article className="rounded-lg border border-slate-100 bg-slate-50 p-3" key={facility.id}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-[10px] font-semibold text-slate-700">{facility.name}</h3>
+                        <p className="mt-1 text-[9px] text-slate-500">{facility.address || 'Sin dirección registrada'}</p>
+                      </div>
+                      <span className={`rounded-full px-2 py-1 text-[8px] ${facility.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-200 text-slate-600'}`}>
+                        {facility.active ? 'Activa' : 'Inactiva'}
+                      </span>
+                    </div>
+                    <p className="mt-3 text-[8px] font-medium uppercase tracking-wide text-slate-400">Departamentos</p>
+                    {facilityDepartments.length > 0
+                      ? <ul className="mt-1 flex flex-wrap gap-1">{facilityDepartments.map((department) => <li className={`rounded px-2 py-1 text-[8px] ${department.active ? 'bg-white text-slate-600' : 'bg-slate-200 text-slate-500'}`} key={department.id}>{department.name}</li>)}</ul>
+                      : <p className="mt-1 text-[8px] text-slate-400">Sin departamentos registrados</p>}
+                  </article>
+                )
+              })}
+            </div>
+          )}
         </Panel>
       </div>
     </>
