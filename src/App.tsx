@@ -29,7 +29,11 @@ function HospitalApp({ session, onSignOut }: { session: Session; onSignOut: () =
     loading: true,
     error: '',
   })
-  const isAdministrator = accessState.access?.roles.some((role) => role.code === 'administrator') ?? false
+  const isReceptionist = accessState.access?.roles.some((role) =>
+    ['receptionist', 'front_desk', 'reception'].includes(role.code),
+  ) ?? false
+  const isAdministrator = !isReceptionist
+    && (accessState.access?.roles.some((role) => role.code === 'administrator') ?? false)
 
   useEffect(() => {
     let active = true

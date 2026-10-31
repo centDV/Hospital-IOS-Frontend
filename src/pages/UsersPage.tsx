@@ -62,7 +62,11 @@ export function UsersPage() {
   const canManageUsers = access?.permissions.some((permission) =>
     permission.facilityId === facilityId && permission.code === 'users.write',
   ) ?? false
-  const isAdministrator = access?.roles.some((role) => role.code === 'administrator') ?? false
+  const isReceptionist = access?.roles.some((role) =>
+    ['receptionist', 'front_desk', 'reception'].includes(role.code),
+  ) ?? false
+  const isAdministrator = !isReceptionist
+    && (access?.roles.some((role) => role.code === 'administrator') ?? false)
   const assignableRoles = roles.filter((role) => ['doctor', 'receptionist'].includes(role.code))
   const responseKey = `${facilityId}:${query.trim()}:${after ?? 'first'}`
   const currentResponse = response?.key === responseKey ? response : null
@@ -144,7 +148,7 @@ export function UsersPage() {
     return <p className="rounded-lg bg-white p-5 text-xs text-slate-500">Tu usuario no tiene permiso para consultar el directorio de usuarios.</p>
   }
   if (!isAdministrator) {
-    return <p className="rounded-lg bg-white p-5 text-xs text-slate-500">Esta pantalla solo está disponible para administradores.</p>
+    return <p className="rounded-lg bg-white p-5 text-xs text-slate-500">Esta pantalla solo está disponible para administradores y no está disponible para personal de recepción.</p>
   }
 
   return (

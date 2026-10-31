@@ -116,9 +116,16 @@ export function AppointmentsPage() {
     ?? ''
   const roles = access?.roles.filter((role) => role.facilityId === facilityId) ?? []
   const permissions = access?.permissions.filter((permission) => permission.facilityId === facilityId) ?? []
-  const isDoctor = roles.some((role) => role.code === 'doctor')
-  const isReceptionist = !isDoctor && roles.some((role) => ['receptionist', 'front_desk', 'reception'].includes(role.code))
+  const hasReceptionistRole = roles.some((role) => ['receptionist', 'front_desk', 'reception'].includes(role.code))
+  const isReceptionist = hasReceptionistRole
     && permissions.some((permission) => permission.code === 'appointments.all')
+  const isDoctor = !isReceptionist && roles.some((role) => role.code === 'doctor')
+  const receptionistMissingPermission = access?.roles.some((role) =>
+    ['receptionist', 'front_desk', 'reception'].includes(role.code)
+      && !access.permissions.some((permission) =>
+        permission.facilityId === role.facilityId && permission.code === 'appointments.all',
+      ),
+  ) ?? false
 
   useEffect(() => {
     if (!facilityId || (!isDoctor && !isReceptionist)) return
@@ -284,6 +291,9 @@ export function AppointmentsPage() {
   }
   if (accessError || facilitiesError) {
     return <p className="rounded-lg bg-rose-50 p-4 text-xs text-rose-800" role="alert">{accessError || facilitiesError}</p>
+  }
+  if (authorizedFacilities.length === 0 && receptionistMissingPermission) {
+    return <p className="rounded-lg bg-amber-50 p-4 text-xs text-amber-800" role="alert">El rol de recepción necesita el permiso appointments.all en Supabase para consultar solicitudes y asignar citas.</p>
   }
   if (!isDoctor && !isReceptionist) {
     return <p className="rounded-lg bg-white p-5 text-xs text-slate-500">Este módulo está disponible para médicos y personal de recepción autorizado.</p>
