@@ -6,7 +6,6 @@ export type Page =
   | 'Citas y Turnos'
   | 'Habitaciones y Camas'
   | 'Turnos del Personal'
-  | 'Laboratorio'
   | 'Inventario y Recursos'
   | 'Ambulancia'
   | 'Reportes y Analítica'

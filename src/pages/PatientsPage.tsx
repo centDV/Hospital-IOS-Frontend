@@ -9,10 +9,12 @@ import {
   registerAdmission,
   registerPatient,
   getAuthorizationErrorMessage,
+  readMyAccess,
   type AdmissionDepartment,
   type AdmissionPhysician,
   type PatientRecord,
   type TriageLevel,
+  type UserAccess,
 } from '../lib/api'
 import { useFacilities } from '../lib/useFacilities'
 
@@ -53,12 +55,15 @@ function Dialog({ title, onClose, children }: { title: string; onClose: () => vo
   )
 }
 
-export function PatientsPage() {
+export function PatientsPage({ onViewChart }: { onViewChart: (patientId: string, isDoctor: boolean) => void }) {
   const { facilities, loading: facilitiesLoading, error: facilitiesError } = useFacilities()
   const [selectedFacilityId, setSelectedFacilityId] = useState('')
   const [query, setQuery] = useState('')
   const [cursors, setCursors] = useState<Array<string | null>>([null])
   const [response, setResponse] = useState<PatientResponse | null>(null)
+  const [userAccess, setUserAccess] = useState<UserAccess | null>(null)
+  const [accessError, setAccessError] = useState('')
+  const [accessLoading, setAccessLoading] = useState(true)
   const [reloadToken, setReloadToken] = useState(0)
   const [showPatientForm, setShowPatientForm] = useState(false)
   const [showAdmissionForm, setShowAdmissionForm] = useState(false)
@@ -90,6 +95,22 @@ export function PatientsPage() {
   const physicians = currentPhysicianResult?.rows ?? []
   const physiciansLoading = showAdmissionForm && Boolean(selectedDepartmentId) && !currentPhysicianResult
   const physicianError = currentPhysicianResult?.error ?? ''
+  const isDoctor = userAccess?.roles.some((role) => role.facilityId === facilityId && role.code === 'doctor') ?? false
+  const showWriteActions = !accessLoading && !accessError && !isDoctor
+
+  useEffect(() => {
+    let active = true
+    readMyAccess().then((access) => {
+      if (active) setUserAccess(access)
+    }).catch((loadError: unknown) => {
+      if (active) setAccessError(loadError instanceof Error ? loadError.message : 'No se pudieron verificar los permisos del usuario.')
+    }).finally(() => {
+      if (active) setAccessLoading(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     if (!facilityId) return
@@ -157,6 +178,7 @@ export function PatientsPage() {
   }
 
   function openPatientForm() {
+    if (!showWriteActions) return
     setActionError('')
     setActionSuccess('')
     setRequestKey('')
@@ -164,6 +186,7 @@ export function PatientsPage() {
   }
 
   function openAdmissionForm(patientId = '') {
+    if (!showWriteActions) return
     setActionError('')
     setActionSuccess('')
     setRequestKey('')
@@ -181,7 +204,7 @@ export function PatientsPage() {
 
   async function submitPatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!facilityId) return
+    if (!facilityId || !showWriteActions) return
     setSubmitting(true)
     setActionError('')
     try {
@@ -214,7 +237,7 @@ export function PatientsPage() {
 
   async function submitAdmission(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selectedPatientId || !selectedDepartmentId || !selectedPhysicianId || !selectedTriageLevelId) return
+    if (!showWriteActions || !selectedPatientId || !selectedDepartmentId || !selectedPhysicianId || !selectedTriageLevelId) return
     setSubmitting(true)
     setActionError('')
     try {
@@ -247,6 +270,7 @@ export function PatientsPage() {
       }} selectedId={facilityId} />
       {facilitiesError && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[10px] text-rose-800" role="alert">{facilitiesError}</p>}
       {!facilitiesLoading && !facilitiesError && facilities.length === 0 && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-[10px] text-amber-800" role="status">No hay instituciones activas disponibles para esta cuenta.</p>}
+      {accessError && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-[10px] text-rose-800" role="alert">No se pudieron verificar los permisos; las acciones de registro están ocultas. {accessError}</p>}
       {actionSuccess && <p className="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-[10px] text-emerald-800" role="status">{actionSuccess}</p>}
       <section className="mb-4 rounded-xl border border-slate-100 bg-white p-3 shadow-[0_2px_10px_rgba(15,23,42,0.025)]">
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -260,8 +284,10 @@ export function PatientsPage() {
               value={query}
             />
           </label>
-          <button className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-3 py-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50" disabled={!facilityId || facilitiesLoading} onClick={openPatientForm} type="button"><Icon name="plus" size={13} /> Nuevo paciente</button>
-          <button className="flex items-center justify-center gap-1.5 rounded-md bg-[#870b30] px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-[#6f0827] disabled:opacity-50" disabled={!facilityId || facilitiesLoading || patients.length === 0} onClick={() => openAdmissionForm()} type="button"><Icon name="plus" size={13} /> Registrar ingreso</button>
+          {showWriteActions && <>
+            <button className="flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-3 py-2 text-[10px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50" disabled={!facilityId || facilitiesLoading} onClick={openPatientForm} type="button"><Icon name="plus" size={13} /> Nuevo paciente</button>
+            <button className="flex items-center justify-center gap-1.5 rounded-md bg-[#870b30] px-3 py-2 text-[10px] font-semibold text-white transition hover:bg-[#6f0827] disabled:opacity-50" disabled={!facilityId || facilitiesLoading || patients.length === 0} onClick={() => openAdmissionForm()} type="button"><Icon name="plus" size={13} /> Registrar ingreso</button>
+          </>}
         </div>
       </section>
       <Panel title="Directorio de pacientes" subtitle="Resultados autorizados por Supabase para la institución seleccionada">
@@ -271,7 +297,7 @@ export function PatientsPage() {
           <>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[700px] text-left text-[10px]">
-                <thead><tr className="border-b border-slate-100 text-slate-400"><th className="pb-3 font-medium">Expediente</th><th className="pb-3 font-medium">Paciente</th><th className="pb-3 font-medium">Fecha de nacimiento</th><th className="pb-3 font-medium">Sexo administrativo</th><th className="pb-3 font-medium">Acción</th></tr></thead>
+                <thead><tr className="border-b border-slate-100 text-slate-400"><th className="pb-3 font-medium">Expediente</th><th className="pb-3 font-medium">Paciente</th><th className="pb-3 font-medium">Fecha de nacimiento</th><th className="pb-3 font-medium">Sexo administrativo</th><th className="pb-3 font-medium">Acción</th>{showWriteActions && <th className="pb-3 font-medium">Ingreso</th>}</tr></thead>
                 <tbody className="divide-y divide-slate-50">
                   {patients.map((patient) => (
                     <tr key={patient.id}>
@@ -279,10 +305,11 @@ export function PatientsPage() {
                       <td className="py-3 font-medium text-slate-700">{patient.givenNames} {patient.familyNames}</td>
                       <td className="py-3 text-slate-500">{patient.birthDate ?? 'No registrado'}</td>
                       <td className="py-3 text-slate-500">{patient.administrativeSex ?? 'No especificado'}</td>
-                      <td className="py-3"><button className="font-medium text-[#870b30] hover:underline" onClick={() => openAdmissionForm(patient.id)} type="button">Registrar ingreso</button></td>
+                      <td className="py-3"><button className="font-medium text-[#870b30] hover:underline disabled:opacity-50" disabled={accessLoading || Boolean(accessError)} onClick={() => onViewChart(patient.id, isDoctor)} type="button">Ver expediente</button></td>
+                      {showWriteActions && <td className="py-3"><button className="font-medium text-[#870b30] hover:underline" onClick={() => openAdmissionForm(patient.id)} type="button">Registrar ingreso</button></td>}
                     </tr>
                   ))}
-                  {patients.length === 0 && <tr><td className="py-8 text-center text-slate-400" colSpan={5}>No se encontraron pacientes.</td></tr>}
+                  {patients.length === 0 && <tr><td className="py-8 text-center text-slate-400" colSpan={showWriteActions ? 6 : 5}>No se encontraron pacientes.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -296,7 +323,7 @@ export function PatientsPage() {
           </>
         )}
       </Panel>
-      {showPatientForm && (
+      {showWriteActions && showPatientForm && (
         <Dialog onClose={closeForms} title="Registrar nuevo paciente">
           <form className="space-y-3" onSubmit={(event) => void submitPatient(event)}>
             <label className="block text-[10px] text-slate-600">Nombres
@@ -323,7 +350,7 @@ export function PatientsPage() {
           </form>
         </Dialog>
       )}
-      {showAdmissionForm && (
+      {showWriteActions && showAdmissionForm && (
         <Dialog onClose={closeForms} title="Registrar ingreso hospitalario">
           <form className="space-y-3" onSubmit={(event) => void submitAdmission(event)}>
             <label className="block text-[10px] text-slate-600">Paciente

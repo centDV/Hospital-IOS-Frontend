@@ -15,12 +15,10 @@ const pendingMetrics = [
   { icon: 'bed' as const, label: 'Habitaciones semiprivadas' },
   { icon: 'activity' as const, label: 'Ambulancia' },
   { icon: 'calendar' as const, label: 'Citas del día' },
-  { icon: 'flask' as const, label: 'Estudios de laboratorio' },
 ]
 
 const pendingPanels = [
   { icon: 'bed' as const, title: 'Infraestructura hospitalaria' },
-  { icon: 'flask' as const, title: 'Laboratorio · estado de estudios' },
   { icon: 'patient' as const, title: 'Ingresos recientes de pacientes' },
   { icon: 'calendar' as const, title: 'Citas de hoy' },
 ]
@@ -33,10 +31,9 @@ function time(value: string): string {
   return new Date(value).toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit' })
 }
 
-export function GeneralDashboard() {
+export function GeneralDashboard({ showUnconnected }: { showUnconnected: boolean }) {
   const { facilities, loading: facilitiesLoading, error: facilitiesError } = useFacilities()
   const [selectedFacilityId, setSelectedFacilityId] = useState('')
-  const [showUnconnected, setShowUnconnected] = useState(true)
   const [response, setResponse] = useState<OverviewResponse | null>(null)
   const facilityId = facilities.find((facility) => facility.id === selectedFacilityId)?.id ?? facilities[0]?.id ?? ''
   const currentResponse = response?.facilityId === facilityId ? response : null
@@ -75,14 +72,6 @@ export function GeneralDashboard() {
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <FacilityPicker facilities={facilities} loading={facilitiesLoading} onChange={setSelectedFacilityId} selectedId={facilityId} />
-        <button
-          aria-pressed={showUnconnected}
-          className="mb-4 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-[#870b30] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#870b30]"
-          onClick={() => setShowUnconnected((visible) => !visible)}
-          type="button"
-        >
-          {showUnconnected ? 'Ocultar sin endpoint' : 'Mostrar todo'}
-        </button>
       </div>
       {facilitiesError && <p className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-800" role="alert">{facilitiesError}</p>}
       {!facilitiesLoading && !facilitiesError && facilities.length === 0 && <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800" role="status">No hay instituciones activas disponibles para esta cuenta.</p>}

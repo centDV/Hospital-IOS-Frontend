@@ -4,9 +4,13 @@ import type { Session } from '@supabase/supabase-js'
 export function Topbar({
   session,
   onSignOut,
+  showUnconnectedModules,
+  onToggleUnconnectedModules,
 }: {
   session: Session
   onSignOut: () => Promise<void>
+  showUnconnectedModules: boolean
+  onToggleUnconnectedModules: () => void
 }) {
   const displayName = typeof session.user.user_metadata.display_name === 'string'
     ? session.user.user_metadata.display_name.trim()
@@ -28,6 +32,14 @@ export function Topbar({
         <kbd className="hidden rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[9px] sm:inline">⌘ K</kbd>
       </label>
       <div className="flex items-center gap-4">
+        <button
+          aria-pressed={showUnconnectedModules}
+          className="whitespace-nowrap rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-medium text-slate-600 transition-colors hover:border-rose-200 hover:bg-rose-50 hover:text-[#870b30] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#870b30]"
+          onClick={onToggleUnconnectedModules}
+          type="button"
+        >
+          {showUnconnectedModules ? 'Ocultar sin endpoint' : 'Mostrar sin endpoint'}
+        </button>
         <button aria-label="Notificaciones" className="relative text-slate-500 hover:text-[#800b2c]" type="button">
           <Icon name="bell" size={17} />
           <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-[#a30b39]" />

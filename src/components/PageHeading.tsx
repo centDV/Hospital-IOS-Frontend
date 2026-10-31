@@ -10,7 +10,6 @@ export function PageHeading({ page }: { page: Page }) {
     'Citas y Turnos': 'Gestiona la programación de consultas y los turnos de atención.',
     'Habitaciones y Camas': 'Controla la ocupación, disponibilidad y asignación de camas hospitalarias.',
     'Turnos del Personal': 'Planifica horarios, cobertura y disponibilidad del personal hospitalario.',
-    'Laboratorio': 'Gestiona órdenes de laboratorio, muestras y resultados clínicos.',
     'Inventario y Recursos': 'Controla suministros médicos, equipos y niveles de existencias.',
     'Ambulancia': 'Monitorea la unidad hospitalaria, su disponibilidad y los despachos de emergencia.',
     'Reportes y Analítica': 'Indicadores estratégicos, estadísticas clínicas y reportes de gestión hospitalaria.',

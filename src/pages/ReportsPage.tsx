@@ -15,7 +15,6 @@ export function ReportsPage() {
     ['Urgencias', 88],
     ['Hospitalización', 72],
     ['Consultas externas', 96],
-    ['Laboratorio', 85],
     ['Enfermería', 91],
   ].filter(([name]) => area === 'Todas las áreas' || name === area)
 
@@ -26,7 +25,7 @@ export function ReportsPage() {
           <select aria-label="Periodo de reportes" className="ml-2 rounded-md bg-slate-50 px-2 py-2 text-slate-700 outline-none" onChange={(event) => { setPeriod(event.target.value); setExported(false) }} value={period}><option>Últimos 30 días</option><option>Últimos 7 días</option><option>Este año</option></select>
         </label>
         <label className="text-[9px] text-slate-500">Área:
-          <select aria-label="Área de reportes" className="ml-2 rounded-md bg-slate-50 px-2 py-2 text-slate-700 outline-none" onChange={(event) => setArea(event.target.value)} value={area}><option>Todas las áreas</option><option>Urgencias</option><option>Hospitalización</option><option>Consultas externas</option><option>Laboratorio</option><option>Enfermería</option></select>
+          <select aria-label="Área de reportes" className="ml-2 rounded-md bg-slate-50 px-2 py-2 text-slate-700 outline-none" onChange={(event) => setArea(event.target.value)} value={area}><option>Todas las áreas</option><option>Urgencias</option><option>Hospitalización</option><option>Consultas externas</option><option>Enfermería</option></select>
         </label>
         <label className="text-[9px] text-slate-500">Tipo de reporte:
           <select aria-label="Tipo de reporte" className="ml-2 rounded-md bg-slate-50 px-2 py-2 text-slate-700 outline-none"><option>General</option><option>Clínico</option><option>Financiero</option><option>Operativo</option></select>
@@ -53,7 +52,7 @@ export function ReportsPage() {
           <div className="space-y-3">{areaMetrics.map(([label, value]) => <div key={String(label)}><div className="mb-1 flex justify-between text-[9px]"><span className="font-medium text-slate-600">{label}</span><strong className="text-slate-700">{value}%</strong></div><div className="h-1.5 rounded-full bg-slate-100"><div className="h-full rounded-full bg-[#870b30]" style={{ width: `${value}%` }} /></div></div>)}</div>
         </Panel>
         <Panel subtitle="Informes listos para consultar" title="Reportes disponibles">
-          <div className="space-y-2">{[['Informe de ocupación', 'Camas, habitaciones y disponibilidad', 'PDF'], ['Reporte de consultas externas', 'Citas, atenciones y especialidades', 'Excel'], ['Resumen de laboratorio', 'Órdenes, muestras y resultados', 'PDF'], ['Reporte de inventario', 'Existencias, movimientos y alertas', 'Excel']].map(([title, detail, format]) => <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2" key={title}><div><p className="text-[9px] font-semibold text-slate-700">{title}</p><p className="mt-0.5 text-[8px] text-slate-400">{detail}</p></div><button className="shrink-0 rounded-md bg-rose-50 px-2.5 py-1.5 text-[8px] font-semibold text-[#870b30]" onClick={() => setExported(true)} type="button">{format} ↓</button></div>)}</div>
+          <div className="space-y-2">{[['Informe de ocupación', 'Camas, habitaciones y disponibilidad', 'PDF'], ['Reporte de consultas externas', 'Citas, atenciones y especialidades', 'Excel'], ['Reporte de inventario', 'Existencias, movimientos y alertas', 'Excel']].map(([title, detail, format]) => <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2" key={title}><div><p className="text-[9px] font-semibold text-slate-700">{title}</p><p className="mt-0.5 text-[8px] text-slate-400">{detail}</p></div><button className="shrink-0 rounded-md bg-rose-50 px-2.5 py-1.5 text-[8px] font-semibold text-[#870b30]" onClick={() => setExported(true)} type="button">{format} ↓</button></div>)}</div>
         </Panel>
       </div>
     </>

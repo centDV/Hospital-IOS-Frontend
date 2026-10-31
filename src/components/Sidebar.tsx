@@ -1,4 +1,5 @@
 import { Icon } from './Icon'
+import { isEndpointConnectedPage } from '../lib/pageAvailability'
 import type { Page, IconName } from '../types'
 
 const navigation: { label: Page; icon: IconName }[] = [
@@ -9,7 +10,6 @@ const navigation: { label: Page; icon: IconName }[] = [
   { label: 'Citas y Turnos', icon: 'calendar' },
   { label: 'Habitaciones y Camas', icon: 'bed' },
   { label: 'Turnos del Personal', icon: 'clock' },
-  { label: 'Laboratorio', icon: 'flask' },
   { label: 'Inventario y Recursos', icon: 'box' },
   { label: 'Ambulancia', icon: 'activity' },
   { label: 'Reportes y Analítica', icon: 'arrow' },
@@ -19,10 +19,16 @@ const navigation: { label: Page; icon: IconName }[] = [
 export function Sidebar({
   page,
   onNavigate,
+  showUnconnectedModules,
 }: {
   page: Page
   onNavigate: (nextPage: Page) => void
+  showUnconnectedModules: boolean
 }) {
+  const visibleNavigation = navigation.filter((item) =>
+    showUnconnectedModules || isEndpointConnectedPage(item.label),
+  )
+
   return (
     <aside className="flex w-full shrink-0 flex-col bg-[#800b2c] text-white md:sticky md:top-0 md:h-screen md:w-[230px]">
       <div className="flex min-h-[88px] flex-col items-center justify-center gap-1 border-b border-white/10 px-3 py-3 text-center">
@@ -36,7 +42,7 @@ export function Sidebar({
       </div>
       <nav aria-label="Navegación principal" className="flex gap-1 overflow-x-auto p-3 md:flex-1 md:flex-col md:overflow-visible">
         <p className="hidden px-3 pb-2 pt-3 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/40 md:block">Menú principal</p>
-        {navigation.map((item) => (
+        {visibleNavigation.map((item) => (
           <button
             aria-current={page === item.label ? 'page' : undefined}
             className={`flex min-w-max items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs transition-colors ${

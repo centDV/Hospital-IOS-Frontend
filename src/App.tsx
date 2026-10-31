@@ -4,6 +4,7 @@ import { AuthGate } from './components/AuthGate'
 import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { PageHeading } from './components/PageHeading'
+import { isEndpointConnectedPage } from './lib/pageAvailability'
 import type { Page } from './types'
 
 const GeneralDashboard = lazy(() => import('./pages/GeneralDashboard').then(({ GeneralDashboard }) => ({ default: GeneralDashboard })))
@@ -13,7 +14,6 @@ const ClinicalRecordPage = lazy(() => import('./pages/ClinicalRecordPage').then(
 const AppointmentsPage = lazy(() => import('./pages/AppointmentsPage').then(({ AppointmentsPage }) => ({ default: AppointmentsPage })))
 const RoomsPage = lazy(() => import('./pages/RoomsPage').then(({ RoomsPage }) => ({ default: RoomsPage })))
 const StaffShiftsPage = lazy(() => import('./pages/StaffShiftsPage').then(({ StaffShiftsPage }) => ({ default: StaffShiftsPage })))
-const LaboratoryPage = lazy(() => import('./pages/LaboratoryPage').then(({ LaboratoryPage }) => ({ default: LaboratoryPage })))
 const InventoryPage = lazy(() => import('./pages/InventoryPage').then(({ InventoryPage }) => ({ default: InventoryPage })))
 const AmbulancePage = lazy(() => import('./pages/AmbulancePage').then(({ AmbulancePage }) => ({ default: AmbulancePage })))
 const ReportsPage = lazy(() => import('./pages/ReportsPage').then(({ ReportsPage }) => ({ default: ReportsPage })))
@@ -21,23 +21,38 @@ const ConfigurationPage = lazy(() => import('./pages/ConfigurationPage').then(({
 
 function HospitalApp({ session, onSignOut }: { session: Session; onSignOut: () => Promise<void> }) {
   const [page, setPage] = useState<Page>('Resumen general')
+  const [showUnconnectedModules, setShowUnconnectedModules] = useState(true)
+  const [chartPatient, setChartPatient] = useState<{ id: string; isDoctor: boolean } | null>(null)
+
+  function toggleUnconnectedModules() {
+    const showModules = !showUnconnectedModules
+    setShowUnconnectedModules(showModules)
+    if (!showModules && !isEndpointConnectedPage(page)) setPage('Resumen general')
+  }
+
+  function navigate(nextPage: Page) {
+    setPage(nextPage)
+    if (nextPage !== 'Expediente Clínico') setChartPatient(null)
+  }
 
   return (
     <div className="min-h-screen bg-[#f7f8fa] text-slate-800 md:flex">
-      <Sidebar onNavigate={setPage} page={page} />
+      <Sidebar onNavigate={navigate} page={page} showUnconnectedModules={showUnconnectedModules} />
       <div className="min-w-0 flex-1">
-        <Topbar onSignOut={onSignOut} session={session} />
+        <Topbar onSignOut={onSignOut} onToggleUnconnectedModules={toggleUnconnectedModules} session={session} showUnconnectedModules={showUnconnectedModules} />
         <main className="mx-auto max-w-[1600px] px-4 py-5 sm:px-7 sm:py-7">
           <PageHeading page={page} />
           <Suspense fallback={<p className="rounded-lg bg-white p-5 text-xs text-slate-500">Cargando pantalla...</p>}>
-            {page === 'Resumen general' && <GeneralDashboard />}
+            {page === 'Resumen general' && <GeneralDashboard showUnconnected={showUnconnectedModules} />}
             {page === 'Usuarios y roles' && <UsersPage />}
-            {page === 'Pacientes e ingresos' && <PatientsPage />}
-            {page === 'Expediente Clínico' && <ClinicalRecordPage />}
+            {page === 'Pacientes e ingresos' && <PatientsPage onViewChart={(patientId, isDoctor) => {
+              setChartPatient({ id: patientId, isDoctor })
+              setPage('Expediente Clínico')
+            }} />}
+            {page === 'Expediente Clínico' && <ClinicalRecordPage onBack={() => navigate('Pacientes e ingresos')} patientId={chartPatient?.id ?? null} isDoctor={chartPatient?.isDoctor ?? false} />}
             {page === 'Citas y Turnos' && <AppointmentsPage />}
             {page === 'Habitaciones y Camas' && <RoomsPage />}
             {page === 'Turnos del Personal' && <StaffShiftsPage />}
-            {page === 'Laboratorio' && <LaboratoryPage />}
             {page === 'Inventario y Recursos' && <InventoryPage />}
             {page === 'Ambulancia' && <AmbulancePage />}
             {page === 'Reportes y Analítica' && <ReportsPage />}

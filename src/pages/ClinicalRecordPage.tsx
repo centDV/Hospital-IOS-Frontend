@@ -1,120 +1,307 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Icon } from '../components/Icon'
-import { Panel, StatusBadge } from '../components/ui'
+import { readPatientChart, type PatientChart } from '../lib/api'
 
-const recordTabs = ['Resumen', 'Historia Clínica', 'Diagnósticos', 'Recetas', 'Órdenes', 'Laboratorio', 'Evolución']
+const chartSections = [
+  { key: 'history', title: 'Consultas y evolución' },
+  { key: 'medical_history', title: 'Antecedentes médicos' },
+  { key: 'conditions', title: 'Condiciones' },
+  { key: 'allergies', title: 'Alergias' },
+  { key: 'medications', title: 'Medicamentos' },
+  { key: 'vitals', title: 'Signos vitales' },
+  { key: 'latest_vitals', title: 'Últimos signos vitales' },
+  { key: 'laboratories', title: 'Estudios' },
+]
 
-export function ClinicalRecordPage() {
-  const [activeTab, setActiveTab] = useState('Resumen')
-  const [showConfidential, setShowConfidential] = useState(false)
+const fieldLabels: Record<string, string> = {
+  assessment: 'Evaluación',
+  blood_type: 'Tipo de sangre',
+  chief_complaint: 'Motivo de consulta',
+  conditions: 'Condiciones',
+  date: 'Fecha',
+  email: 'Correo electrónico',
+  ended_at: 'Finalizó',
+  family: 'Familiar',
+  given_names: 'Nombres',
+  history: 'Antecedente',
+  instructions: 'Indicaciones',
+  kind: 'Tipo',
+  label: 'Signo vital',
+  medical_history: 'Antecedentes',
+  medications: 'Medicamentos',
+  narrative: 'Resultado',
+  name: 'Analito',
+  objective: 'Hallazgos',
+  patient_name: 'Paciente',
+  period: 'Cita asignada',
+  phone: 'Teléfono',
+  plan: 'Plan',
+  record_number: 'Expediente',
+  reference: 'Referencia',
+  released_at: 'Fecha de resultado',
+  requested_at: 'Fecha de solicitud',
+  started_at: 'Fecha de consulta',
+  status: 'Estado',
+  subjective: 'Síntomas y relato',
+  value: 'Resultado',
+}
 
-  return (
-    <>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
-        <span>Inicio <Icon className="mx-1 inline" name="chevron" size={10} /> Expediente Clínico <Icon className="mx-1 inline" name="chevron" size={10} /> EXP-2024-00124</span>
-        <button className="rounded-md bg-[#870b30] px-3 py-2 font-semibold text-white hover:bg-[#6f0827]" onClick={() => setShowConfidential((visible) => !visible)} type="button">
-          Acciones <Icon className="ml-1 inline" name="chevron" size={11} />
-        </button>
-      </div>
-      {showConfidential && <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-[10px] text-rose-800">Acciones del expediente: imprimir resumen · descargar expediente · compartir con personal autorizado.</div>}
-      <section className="mb-4 grid grid-cols-1 gap-3 rounded-xl border border-slate-100 bg-white p-4 shadow-[0_2px_10px_rgba(15,23,42,0.025)] lg:grid-cols-[1fr_230px]">
-        <div className="flex flex-wrap items-center gap-4">
-          <span className="flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 text-base font-semibold text-[#870b30]">VA</span>
-          <div className="min-w-[180px] flex-1">
-            <h2 className="text-sm font-bold text-slate-800">Víctor Rafael Arevalo Sierra</h2>
-            <p className="mt-1 text-[9px] text-slate-400">EXP-2024-00124 · Paciente desde 2019</p>
-            <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2 text-[9px] sm:grid-cols-4">
-              <div><p className="text-slate-400">Edad</p><p className="mt-0.5 font-semibold text-slate-700">67 años</p></div>
-              <div><p className="text-slate-400">Sexo</p><p className="mt-0.5 font-semibold text-slate-700">Masculino</p></div>
-              <div><p className="text-slate-400">Tipo de sangre</p><p className="mt-0.5 font-semibold text-slate-700">O+</p></div>
-              <div><p className="text-slate-400">Médico tratante</p><p className="mt-0.5 font-semibold text-slate-700">Dr. Luis Ramírez</p></div>
+const statusLabels: Record<string, string> = {
+  active: 'Activa',
+  cancelled: 'Cancelado',
+  closed: 'Cerrada',
+  completed: 'Completado',
+  draft: 'Borrador',
+  in_progress: 'En proceso',
+  ordered: 'Solicitado',
+  resolved: 'Resuelta',
+  signed: 'Firmada',
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function formatLabel(key: string): string {
+  return fieldLabels[key] ?? key.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
+function formatValue(value: unknown, key = ''): string {
+  if (value === null || value === undefined || value === '') return 'No registrado'
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'unknown') return 'No especificado'
+    if (key === 'status') return statusLabels[normalized] ?? value.replaceAll('_', ' ')
+    if (key === 'kind') {
+      const kinds: Record<string, string> = {
+        family: 'Familiar',
+        personal: 'Personal',
+        surgical: 'Quirúrgico',
+        medical: 'Médico',
+      }
+      if (kinds[normalized]) return kinds[normalized]
+    }
+    if (key.endsWith('_at') || key.endsWith('_on')) {
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+        ? new Date(`${value}T12:00:00`)
+        : new Date(value)
+      if (!Number.isNaN(date.getTime())) {
+        return key.endsWith('_at') && value.includes('T')
+          ? date.toLocaleString('es-SV', { dateStyle: 'medium', timeStyle: 'short' })
+          : date.toLocaleDateString('es-SV', { dateStyle: 'medium' })
+      }
+    }
+    return value
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return value.map((entry) => formatValue(entry)).join(', ')
+  if (isRecord(value)) {
+    return Object.entries(value)
+      .filter(([entryKey, entry]) => !isHiddenField(entryKey) && entry !== null && entry !== undefined && entry !== '')
+      .map(([entryKey, entry]) => `${formatLabel(entryKey)}: ${formatValue(entry, entryKey)}`)
+      .join(' · ')
+  }
+  return 'No disponible'
+}
+
+function isHiddenField(key: string): boolean {
+  return key === 'id' || key.endsWith('_id') || key === 'row_version' || key.endsWith('_version')
+}
+
+function getSectionItems(chart: PatientChart, key: string): unknown[] {
+  const value = chart[key]
+  if (Array.isArray(value)) return value
+  if (isRecord(value)) return Object.entries(value).map(([label, entry]) => ({ label: label.replaceAll('_', ' '), value: entry }))
+  return []
+}
+
+function getItemTitle(item: unknown, sectionKey: string): string {
+  if (!isRecord(item)) return ''
+  const titleKey = sectionKey === 'history'
+    ? 'started_at'
+    : ''
+  return titleKey && item[titleKey] ? formatValue(item[titleKey], titleKey) : ''
+}
+
+function ChartItem({ item, sectionKey }: { item: unknown; sectionKey: string }) {
+  if (!isRecord(item)) {
+    if (sectionKey === 'medical_history' && typeof item === 'string') {
+      const match = item.trim().match(/^([\p{L}\w]+)\s*-\s*(\d{4}-\d{2}-\d{2})\s*-\s*(.+)$/u)
+      if (match) {
+        return (
+          <article className="grid grid-cols-1 gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-3">
+            <div><p className="text-[11px] font-medium text-slate-500">Tipo</p><p className="mt-1 text-sm text-slate-700">{formatValue(match[1], 'kind')}</p></div>
+            <div><p className="text-[11px] font-medium text-slate-500">Fecha</p><p className="mt-1 text-sm text-slate-700">{formatValue(match[2], 'occurred_on')}</p></div>
+            <div className="sm:col-span-3"><p className="text-[11px] font-medium text-slate-500">Antecedente</p><p className="mt-1 text-sm leading-relaxed text-slate-700">{match[3]}</p></div>
+          </article>
+        )
+      }
+    }
+    return <p className="rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-600">{formatValue(item)}</p>
+  }
+
+  if (sectionKey === 'laboratories') {
+    const results = Array.isArray(item.values) ? item.values : []
+    const details = Object.entries(item).filter(([key, value]) =>
+      !isHiddenField(key)
+        && !['values', 'test_name'].includes(key)
+        && value !== null
+        && value !== undefined
+        && value !== '',
+    )
+    return (
+      <article className="rounded-lg bg-slate-50 p-3">
+        <h4 className="mb-3 text-sm font-semibold text-slate-800">{formatValue(item.test_name, 'test_name')}</h4>
+        <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {details.map(([key, value]) => (
+            <div className={key === 'instructions' || key === 'narrative' ? 'sm:col-span-2' : ''} key={key}>
+              <dt className="text-[11px] font-semibold text-slate-500">{formatLabel(key)}</dt>
+              <dd className="mt-1 break-words text-sm leading-relaxed text-slate-700">{formatValue(value, key)}</dd>
+            </div>
+          ))}
+        </dl>
+        {results.length > 0 && (
+          <div className="mt-3 border-t border-slate-200 pt-3">
+            <h5 className="mb-2 text-[11px] font-semibold text-slate-600">Resultados</h5>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {results.map((result, index) => {
+                if (!isRecord(result)) {
+                  return <p className="rounded-md border border-slate-100 bg-white p-2.5 text-sm text-slate-700" key={`result-${index}`}>{formatValue(result)}</p>
+                }
+                const resultDetails = Object.entries(result).filter(([key, value]) =>
+                  !isHiddenField(key) && value !== null && value !== undefined && value !== '',
+                )
+                const analyteName = typeof result.name === 'string' ? result.name : 'Resultado'
+                return (
+                  <dl className="rounded-md border border-slate-100 bg-white p-2.5" key={`result-${index}`}>
+                    <dt className="text-xs font-semibold text-slate-800">{analyteName}</dt>
+                    {resultDetails.filter(([key]) => key !== 'name').map(([key, value]) => (
+                      <div className="mt-2" key={key}>
+                        <dd className="break-words text-sm leading-relaxed text-slate-700">
+                          <span className="font-medium text-slate-500">{formatLabel(key)}: </span>
+                          {formatValue(value, key)}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                )
+              })}
             </div>
           </div>
-        </div>
-        <div className="rounded-lg bg-rose-50 p-3">
-          <p className="text-[10px] font-semibold text-[#870b30]">Información confidencial</p>
-          <p className="mt-1 text-[9px] leading-relaxed text-slate-500">Este expediente contiene datos personales y clínicos protegidos. Acceso según autorización.</p>
-          <p className="mt-2 text-[9px] text-rose-700">Última actualización: hoy, 10:24</p>
-        </div>
-      </section>
-      <nav aria-label="Secciones del expediente" className="mb-4 flex gap-1 overflow-x-auto border-b border-slate-200">
-        {recordTabs.map((tab) => <button aria-current={activeTab === tab ? 'page' : undefined} className={`shrink-0 border-b-2 px-3 py-2.5 text-[10px] ${activeTab === tab ? 'border-[#870b30] font-semibold text-[#870b30]' : 'border-transparent text-slate-500 hover:text-slate-800'}`} key={tab} onClick={() => setActiveTab(tab)} type="button">{tab}</button>)}
-      </nav>
-      {activeTab === 'Resumen' ? (
+        )}
+      </article>
+    )
+  }
+
+  const fields = Object.entries(item).filter(([key, value]) =>
+    !isHiddenField(key)
+      && !(sectionKey === 'history' && key === 'started_at')
+      && value !== null
+      && value !== undefined
+      && value !== '',
+  )
+  const title = getItemTitle(item, sectionKey)
+
+  return (
+    <article className="rounded-lg bg-slate-50 p-3">
+      {title && <h4 className="mb-2 text-sm font-semibold text-slate-800">{title}</h4>}
+      <dl className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+        {fields.map(([key, value]) => (
+          <div className="min-w-0" key={key}>
+            <dt className="text-[11px] font-semibold text-slate-500">{formatLabel(key)}</dt>
+            <dd className="mt-1 break-words text-sm leading-relaxed text-slate-700">{formatValue(value, key)}</dd>
+          </div>
+        ))}
+      </dl>
+    </article>
+  )
+}
+
+export function ClinicalRecordPage({
+  patientId,
+  isDoctor,
+  onBack,
+}: {
+  patientId: string | null
+  isDoctor: boolean
+  onBack: () => void
+}) {
+  const [response, setResponse] = useState<{ key: string; chart: PatientChart | null; error: string } | null>(null)
+  const responseKey = `${patientId ?? ''}:${isDoctor}`
+  const currentResponse = response?.key === responseKey ? response : null
+  const chart = currentResponse?.chart ?? null
+  const loading = Boolean(patientId) && !currentResponse
+  const error = currentResponse?.error ?? ''
+
+  useEffect(() => {
+    if (!patientId) return
+
+    let active = true
+    readPatientChart(patientId, isDoctor).then((result) => {
+      if (active) setResponse({ key: responseKey, chart: result, error: '' })
+    }).catch((loadError: unknown) => {
+      if (active) setResponse({
+        key: responseKey,
+        chart: null,
+        error: loadError instanceof Error ? loadError.message : 'No se pudo cargar el expediente clínico.',
+      })
+    })
+    return () => {
+      active = false
+    }
+  }, [isDoctor, patientId, responseKey])
+
+  const patient = chart && isRecord(chart.patient) ? chart.patient : null
+  const patientName = patient
+    ? formatValue(patient.full_name ?? [patient.given_names, patient.family_names].filter((part) => typeof part === 'string').join(' '))
+    : ''
+
+  return (
+    <div className="space-y-4">
+      <button className="inline-flex items-center gap-2 text-xs font-medium text-[#870b30] hover:underline" onClick={onBack} type="button">
+        <Icon className="rotate-180" name="arrowRight" size={14} /> Volver a pacientes
+      </button>
+      {loading && <p className="rounded-lg bg-white p-5 text-xs text-slate-500" role="status">Cargando expediente autorizado...</p>}
+      {error && <p className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800" role="alert">{error}</p>}
+      {!patientId && <p className="rounded-lg bg-white p-5 text-xs text-slate-500">Selecciona un paciente desde el directorio para consultar su expediente.</p>}
+      {patient && chart && (
         <>
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-            <Panel className="xl:col-span-4" subtitle="Diagnóstico principal" title="Diagnóstico actual">
-              <div className="rounded-lg bg-rose-50 p-3">
-                <p className="text-[10px] font-semibold text-[#870b30]">Neumonía adquirida en la comunidad</p>
-                <p className="mt-1 text-[9px] text-slate-500">CIE-10: J18.9 · Diagnóstico principal</p>
-                <div className="mt-3 flex items-center justify-between text-[9px]"><span className="text-slate-400">Fecha de diagnóstico: 20 oct. 2024</span><StatusBadge status="Ingresado" /></div>
+          <section className="rounded-xl border border-slate-100 bg-white p-4 shadow-[0_2px_10px_rgba(15,23,42,0.025)]">
+            <div className="flex flex-wrap items-start gap-4">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-rose-50 text-sm font-semibold text-[#870b30]">
+                {patientName.split(/\s+/).slice(0, 2).map((part) => part[0] ?? '').join('').toUpperCase()}
+              </span>
+              <div className="min-w-[180px] flex-1">
+                <h2 className="text-base font-semibold text-slate-800">{patientName}</h2>
+                <p className="mt-1 text-xs text-slate-500">Expediente: {formatValue(patient.record_number ?? patient.medical_record_number)}</p>
+                <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
+                  <p><span className="text-slate-400">Nacimiento: </span><span className="text-slate-700">{formatValue(patient.birth_date)}</span></p>
+                  <p><span className="text-slate-400">Sexo: </span><span className="text-slate-700">{formatValue(patient.sex ?? patient.administrative_sex)}</span></p>
+                  <p><span className="text-slate-400">Teléfono: </span><span className="text-slate-700">{formatValue(patient.phone)}</span></p>
+                  <p><span className="text-slate-400">Tipo de sangre: </span><span className="text-slate-700">{formatValue(chart.blood_type ?? chart.blood_group, 'blood_type')}</span></p>
+                </div>
               </div>
-              <div className="mt-3 flex gap-2 text-[9px]"><span className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-700">En tratamiento</span><span className="rounded-full bg-sky-50 px-2 py-1 text-sky-700">Evolución favorable</span></div>
-            </Panel>
-            <Panel className="xl:col-span-5" subtitle="Último registro · Hoy, 10:15" title="Signos vitales">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {[
-                  ['Presión arterial', '128/76', 'mmHg'],
-                  ['Frecuencia cardíaca', '78', 'lpm'],
-                  ['Frecuencia respiratoria', '18', 'rpm'],
-                  ['Temperatura', '36.8', '°C'],
-                  ['Saturación O₂', '97', '%'],
-                  ['Peso', '72.5', 'kg'],
-                ].map(([label, value, unit]) => <div className="rounded-lg bg-slate-50 p-2.5" key={label}><p className="text-[9px] text-slate-400">{label}</p><p className="mt-1 text-sm font-bold text-[#870b30]">{value}<span className="ml-1 text-[9px] font-normal text-slate-400">{unit}</span></p></div>)}
-              </div>
-            </Panel>
-            <Panel className="xl:col-span-3" title="Alertas y consideraciones">
-              <div className="space-y-2">
-                {[
-                  ['Alergia a penicilina', 'Crítica'],
-                  ['Alergia a sulfas', 'Crítica'],
-                  ['Hipertensión arterial', 'Importante'],
-                  ['Diabetes tipo 2', 'Importante'],
-                ].map(([label, level], index) => <div className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-[9px] ${index < 2 ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`} key={label}><span className="font-medium">{label}</span><span>{level}</span></div>)}
-              </div>
-            </Panel>
-            <Panel className="xl:col-span-4" title="Antecedentes">
-              <div className="space-y-3 text-[9px]">
-                <div><p className="font-semibold text-slate-700">Patológicos</p><p className="mt-0.5 text-slate-400">Hipertensión arterial · diagnosticada en 2018</p></div>
-                <div><p className="font-semibold text-slate-700">Quirúrgicos</p><p className="mt-0.5 text-slate-400">Apendicectomía · 2015</p></div>
-                <div><p className="font-semibold text-slate-700">Alergias</p><p className="mt-0.5 text-slate-400">Penicilina y sulfas</p></div>
-              </div>
-            </Panel>
-            <Panel className="xl:col-span-4" title="Medicamentos activos">
-              <div className="space-y-2 text-[9px]">
-                {[
-                  ['Levofloxacino 750 mg', 'Vía oral · cada 24 h · 7 días'],
-                  ['Paracetamol 500 mg', 'Vía oral · cada 8 h · según dolor'],
-                  ['Losartán 50 mg', 'Vía oral · cada 24 h · crónico'],
-                  ['Metformina 850 mg', 'Vía oral · cada 12 h · crónico'],
-                ].map(([medicine, dosage]) => <div className="rounded-lg bg-slate-50 p-2" key={medicine}><p className="font-semibold text-slate-700">{medicine}</p><p className="mt-0.5 text-slate-400">{dosage}</p></div>)}
-              </div>
-            </Panel>
-            <Panel className="xl:col-span-4" title="Próxima cita">
-              <div className="flex items-center gap-3 rounded-lg bg-slate-50 p-3">
-                <div className="rounded-lg bg-white px-3 py-2 text-center"><p className="text-[8px] font-bold uppercase text-[#870b30]">Oct</p><p className="text-lg font-bold text-slate-800">30</p></div>
-                <div><p className="text-[10px] font-semibold text-slate-700">Consulta de seguimiento</p><p className="mt-1 text-[9px] text-slate-400">Medicina interna · 10:00 a. m.</p><span className="mt-2 inline-block rounded-full bg-sky-50 px-2 py-1 text-[8px] text-sky-700">Programada</span></div>
-              </div>
-            </Panel>
-            <Panel className="xl:col-span-6" title="Notas médicas recientes">
-              <div className="space-y-3">{[['24 oct. 2024 · Dr. Luis Ramírez', 'Nota de evolución · Paciente con mejoría clínica'], ['23 oct. 2024 · Dra. Ana Castillo', 'Seguimiento de tratamiento y signos vitales'], ['20 oct. 2024 · Dr. Jorge Méndez', 'Nota de ingreso · Evaluación inicial']].map(([title, note]) => <div className="border-l-2 border-rose-200 pl-3" key={title}><p className="text-[9px] font-semibold text-slate-700">{title}</p><p className="mt-1 text-[9px] text-slate-400">{note}</p></div>)}</div>
-            </Panel>
-            <Panel className="xl:col-span-6" title="Órdenes y resultados recientes">
-              <div className="space-y-3">{[['22 oct. · Biometría hemática', 'Completada'], ['22 oct. · Cultivo de esputo', 'En proceso'], ['21 oct. · Radiografía de tórax', 'Completada']].map(([label, state]) => <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-[9px]" key={label}><span className="text-slate-600">{label}</span><span className={state === 'Completada' ? 'text-emerald-700' : 'text-amber-700'}>{state}</span></div>)}</div>
-            </Panel>
+            </div>
+          </section>
+
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {chartSections.map(({ key, title }) => {
+              const items = getSectionItems(chart, key)
+              if (items.length === 0) return null
+              return (
+                <section className="rounded-xl border border-slate-100 bg-white p-4 shadow-[0_2px_10px_rgba(15,23,42,0.025)]" key={key}>
+                  <h3 className="mb-3 text-xs font-semibold text-slate-800">{title}</h3>
+                  <div className="space-y-2">
+                    {items.map((item, index) => (
+                      <ChartItem item={item} key={`${key}-${index}`} sectionKey={key} />
+                    ))}
+                  </div>
+                </section>
+              )
+            })}
           </div>
         </>
-      ) : (
-        <Panel subtitle={`Registro de ${activeTab.toLowerCase()} del paciente`} title={activeTab}>
-          <div className="space-y-3">
-            {[
-              ['24 oct. 2024 · Dr. Luis Ramírez', 'Seguimiento de neumonía adquirida en la comunidad. Evolución estable, continuar esquema indicado y control de signos vitales.'],
-              ['22 oct. 2024 · Dra. Ana Castillo', 'Paciente tolera tratamiento. Se solicitan estudios de control y evaluación clínica en 48 horas.'],
-              ['20 oct. 2024 · Dr. Jorge Méndez', 'Ingreso y evaluación inicial. Se documentan antecedentes, alergias y plan terapéutico.'],
-            ].map(([date, note]) => <article className="rounded-lg border border-slate-100 p-3" key={date}><p className="text-[10px] font-semibold text-[#870b30]">{date}</p><p className="mt-2 text-[10px] leading-relaxed text-slate-500">{note}</p></article>)}
-          </div>
-        </Panel>
       )}
-    </>
+    </div>
   )
 }

@@ -33,18 +33,6 @@ export interface AdmissionPhysician {
   name: string
 }
 
-export interface LaboratoryOrder {
-  id: string
-  orderId: string
-  orderNumber: string
-  patientId: string
-  patientName: string
-  testName: string
-  priority: string
-  status: string
-  orderedAt: string
-}
-
 export interface HospitalInformation {
   id: string
   category: string
@@ -69,6 +57,12 @@ export interface HospitalOverview {
   information: HospitalInformation[]
   onDuty: OnDutyStaff[]
 }
+
+export interface UserAccess {
+  roles: Array<{ facilityId: string; code: string }>
+}
+
+export type PatientChart = Record<string, unknown>
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -115,6 +109,41 @@ export async function readFacilities(): Promise<Facility[]> {
       active: row.active,
     }
   }).filter((facility) => facility.active)
+}
+
+export async function readMyAccess(): Promise<UserAccess> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data, error } = await supabase.rpc('my_access')
+  if (error) throw error
+  if (!isRecord(data) || !Array.isArray(data.roles)) {
+    throw new Error('Permisos del usuario: respuesta con formato inválido.')
+  }
+  return {
+    roles: data.roles.map((value) => {
+      if (!isRecord(value)) throw new Error('Permisos del usuario: rol con formato inválido.')
+      return {
+        facilityId: requiredString(value, 'facility_id', 'Permisos del usuario'),
+        code: requiredString(value, 'code', 'Permisos del usuario'),
+      }
+    }),
+  }
+}
+
+export async function readPatientChart(patientId: string, isDoctor: boolean): Promise<PatientChart> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data, error } = isDoctor
+    ? await supabase.rpc('doctor_chart', {
+      p_patient: patientId,
+      p_from: null,
+      p_to: null,
+      p_query: '',
+    })
+    : await supabase.rpc('patient_chart', { p_patient: patientId })
+  if (error) throw error
+  if (!isRecord(data) || !isRecord(data.patient)) {
+    throw new Error('Expediente clínico: respuesta con formato inválido.')
+  }
+  return data
 }
 
 export async function readPatients(facilityId: string, query: string, after: string | null): Promise<PatientRecord[]> {
@@ -231,27 +260,6 @@ export async function registerAdmission(input: {
   if (!isRecord(data) || typeof data.id !== 'string') {
     throw new Error('El registro de ingreso no devolvió un identificador válido.')
   }
-}
-
-export async function readLaboratoryWorklist(facilityId: string, after: string | null): Promise<LaboratoryOrder[]> {
-  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('laboratory_worklist', {
-    p_facility: facilityId,
-    p_limit: 25,
-    p_after: after,
-  })
-  if (error) throw error
-  return parseRows(data, 'Órdenes de laboratorio', (row) => ({
-    id: requiredString(row, 'id', 'Órdenes de laboratorio'),
-    orderId: requiredString(row, 'order_id', 'Órdenes de laboratorio'),
-    orderNumber: requiredString(row, 'order_number', 'Órdenes de laboratorio'),
-    patientId: requiredString(row, 'patient_id', 'Órdenes de laboratorio'),
-    patientName: requiredString(row, 'patient_name', 'Órdenes de laboratorio'),
-    testName: requiredString(row, 'test_name', 'Órdenes de laboratorio'),
-    priority: requiredString(row, 'priority', 'Órdenes de laboratorio'),
-    status: requiredString(row, 'status', 'Órdenes de laboratorio'),
-    orderedAt: requiredString(row, 'ordered_at', 'Órdenes de laboratorio'),
-  }))
 }
 
 export async function readHospitalOverview(facilityId: string): Promise<HospitalOverview> {
