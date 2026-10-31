@@ -1,10 +1,11 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { AuthGate } from './components/AuthGate'
 import { Sidebar } from './components/Sidebar'
 import { Topbar } from './components/Topbar'
 import { PageHeading } from './components/PageHeading'
 import { isEndpointConnectedPage } from './lib/pageAvailability'
+import { readMyAccess, type UserAccess } from './lib/api'
 import type { Page } from './types'
 
 const GeneralDashboard = lazy(() => import('./pages/GeneralDashboard').then(({ GeneralDashboard }) => ({ default: GeneralDashboard })))
@@ -21,8 +22,36 @@ const ConfigurationPage = lazy(() => import('./pages/ConfigurationPage').then(({
 
 function HospitalApp({ session, onSignOut }: { session: Session; onSignOut: () => Promise<void> }) {
   const [page, setPage] = useState<Page>('Resumen general')
-  const [showUnconnectedModules, setShowUnconnectedModules] = useState(true)
+  const [showUnconnectedModules, setShowUnconnectedModules] = useState(false)
   const [chartPatient, setChartPatient] = useState<{ id: string; isDoctor: boolean } | null>(null)
+  const [accessState, setAccessState] = useState<{ access: UserAccess | null; loading: boolean; error: string }>({
+    access: null,
+    loading: true,
+    error: '',
+  })
+  const isAdministrator = accessState.access?.roles.some((role) => role.code === 'administrator') ?? false
+
+  useEffect(() => {
+    let active = true
+    readMyAccess().then((access) => {
+      if (active) setAccessState({ access, loading: false, error: '' })
+    }).catch((loadError: unknown) => {
+      if (active) setAccessState({
+        access: null,
+        loading: false,
+        error: loadError instanceof Error ? loadError.message : 'No se pudieron comprobar los permisos.',
+      })
+    })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!accessState.loading && page === 'Usuarios y roles' && !isAdministrator) {
+      setPage('Resumen general')
+    }
+  }, [accessState.loading, isAdministrator, page])
 
   function toggleUnconnectedModules() {
     const showModules = !showUnconnectedModules
@@ -31,20 +60,25 @@ function HospitalApp({ session, onSignOut }: { session: Session; onSignOut: () =
   }
 
   function navigate(nextPage: Page) {
+    if (nextPage === 'Usuarios y roles' && !isAdministrator) return
     setPage(nextPage)
     if (nextPage !== 'Expediente Clínico') setChartPatient(null)
   }
 
   return (
     <div className="min-h-screen bg-[#f7f8fa] text-slate-800 md:flex">
-      <Sidebar onNavigate={navigate} page={page} showUnconnectedModules={showUnconnectedModules} />
+      <Sidebar isAdministrator={isAdministrator} onNavigate={navigate} page={page} showUnconnectedModules={showUnconnectedModules} />
       <div className="min-w-0 flex-1">
         <Topbar onSignOut={onSignOut} onToggleUnconnectedModules={toggleUnconnectedModules} session={session} showUnconnectedModules={showUnconnectedModules} />
         <main className="mx-auto max-w-[1600px] px-4 py-5 sm:px-7 sm:py-7">
           <PageHeading page={page} />
           <Suspense fallback={<p className="rounded-lg bg-white p-5 text-xs text-slate-500">Cargando pantalla...</p>}>
             {page === 'Resumen general' && <GeneralDashboard showUnconnected={showUnconnectedModules} />}
-            {page === 'Usuarios y roles' && <UsersPage />}
+            {page === 'Usuarios y roles' && (accessState.loading
+              ? <p className="rounded-lg bg-white p-5 text-xs text-slate-500" role="status">Verificando permisos administrativos...</p>
+              : accessState.error
+                ? <p className="rounded-lg bg-rose-50 p-4 text-xs text-rose-800" role="alert">{accessState.error}</p>
+                : isAdministrator && <UsersPage />)}
             {page === 'Pacientes e ingresos' && <PatientsPage onViewChart={(patientId, isDoctor) => {
               setChartPatient({ id: patientId, isDoctor })
               setPage('Expediente Clínico')

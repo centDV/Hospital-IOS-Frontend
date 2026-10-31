@@ -62,11 +62,13 @@ export function UsersPage() {
   const canManageUsers = access?.permissions.some((permission) =>
     permission.facilityId === facilityId && permission.code === 'users.write',
   ) ?? false
-  const receptionistRole = roles.find((role) => role.code === 'receptionist')
+  const isAdministrator = access?.roles.some((role) => role.code === 'administrator') ?? false
+  const assignableRoles = roles.filter((role) => ['doctor', 'receptionist'].includes(role.code))
   const responseKey = `${facilityId}:${query.trim()}:${after ?? 'first'}`
   const currentResponse = response?.key === responseKey ? response : null
   const loading = Boolean(facilityId) && !currentResponse
   const users = currentResponse?.users ?? []
+  const doctorCount = users.filter((user) => user.roles.some((role) => role.code === 'doctor')).length
   const receptionistCount = users.filter((user) => user.roles.some((role) => role.code === 'receptionist')).length
 
   useEffect(() => {
@@ -105,26 +107,26 @@ export function UsersPage() {
     }
   }, [after, facilityId, query, responseKey])
 
-  async function assignReceptionist(user: ManagedUser) {
-    if (!facilityId || !receptionistRole || !canManageUsers || user.id === access?.profileId) return
+  async function assignRole(user: ManagedUser, role: SystemRole) {
+    if (!facilityId || !canManageUsers || !isAdministrator || user.id === access?.profileId) return
     setSavingUserId(user.id)
     setActionError('')
     setActionSuccess('')
     try {
       const currentRoleIds = user.roles.map((role) => role.id)
-      const roleIds = currentRoleIds.includes(receptionistRole.id)
+      const roleIds = currentRoleIds.includes(role.id)
         ? currentRoleIds
-        : [...currentRoleIds, receptionistRole.id]
+        : [...currentRoleIds, role.id]
       await setUserRoles(user.id, facilityId, roleIds)
       setResponse((current) => current && current.key.startsWith(`${facilityId}:${query.trim()}:`)
         ? {
           ...current,
-          users: current.users.map((item) => item.id === user.id && !item.roles.some((role) => role.id === receptionistRole.id)
-            ? { ...item, roles: [...item.roles, receptionistRole] }
+          users: current.users.map((item) => item.id === user.id && !item.roles.some((existingRole) => existingRole.id === role.id)
+            ? { ...item, roles: [...item.roles, role] }
             : item),
         }
         : current)
-      setActionSuccess(`Se asignó el rol de recepcionista a ${displayName(user)}.`)
+      setActionSuccess(`Se asignó el rol ${role.name} a ${displayName(user)}.`)
     } catch (saveError: unknown) {
       setActionError(saveError instanceof Error ? saveError.message : 'No se pudo asignar el rol de recepcionista.')
     } finally {
@@ -141,6 +143,9 @@ export function UsersPage() {
   if (authorizedFacilities.length === 0) {
     return <p className="rounded-lg bg-white p-5 text-xs text-slate-500">Tu usuario no tiene permiso para consultar el directorio de usuarios.</p>
   }
+  if (!isAdministrator) {
+    return <p className="rounded-lg bg-white p-5 text-xs text-slate-500">Esta pantalla solo está disponible para administradores.</p>
+  }
 
   return (
     <div className="space-y-4">
@@ -154,9 +159,11 @@ export function UsersPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Usuarios y roles</h2>
-            <p className="mt-1 text-xs text-slate-500">Consulta los usuarios de la institución y asigna el rol de recepción.</p>
+            <p className="mt-1 text-xs text-slate-500">Consulta los usuarios de la institución y asigna roles médicos o de recepción.</p>
           </div>
-          {receptionistRole && <span className="rounded-full bg-rose-50 px-3 py-1.5 text-xs font-medium text-[#870b30]">Rol disponible: {receptionistRole.name}</span>}
+          <div className="flex flex-wrap gap-2">
+            {assignableRoles.map((role) => <span className="rounded-full bg-rose-50 px-3 py-1.5 text-xs font-medium text-[#870b30]" key={role.id}>Rol disponible: {role.name}</span>)}
+          </div>
         </div>
         <label className="mt-4 flex max-w-xl items-center gap-2 rounded-md bg-slate-50 px-3 py-2 text-slate-400">
           <span aria-hidden="true">⌕</span>
@@ -174,14 +181,13 @@ export function UsersPage() {
       {actionError && <p className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800" role="alert">{actionError}</p>}
       {actionSuccess && <p className="rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800" role="status">{actionSuccess}</p>}
 
-      <Panel title="Directorio de usuarios" subtitle={loading ? 'Cargando...' : `${users.length} usuarios encontrados · ${receptionistCount} con rol de recepcionista`}>
+      <Panel title="Directorio de usuarios" subtitle={loading ? 'Cargando...' : `${users.length} usuarios · ${doctorCount} médicos · ${receptionistCount} recepcionistas`}>
         {loading ? <p className="py-8 text-center text-xs text-slate-500" role="status">Cargando directorio...</p> : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[680px] text-left text-xs">
               <thead><tr className="border-b border-slate-100 text-slate-400"><th className="pb-3 font-medium">Usuario</th><th className="pb-3 font-medium">Roles asignados</th><th className="pb-3 font-medium">Estado</th><th className="pb-3 font-medium">Acción</th></tr></thead>
               <tbody className="divide-y divide-slate-50">
                 {users.map((user) => {
-                  const hasReceptionist = user.roles.some((role) => role.code === 'receptionist')
                   const isSelf = user.id === access?.profileId
                   return (
                     <tr key={user.id}>
@@ -194,11 +200,21 @@ export function UsersPage() {
                       <td className="py-3 text-slate-600">{user.roles.map((role) => role.name).join(' · ') || 'Sin roles'}</td>
                       <td className="py-3"><span className={`rounded-full px-2 py-1 text-[10px] ${user.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{statusLabel(user.status)}</span></td>
                       <td className="py-3">
-                        {hasReceptionist
-                          ? <span className="text-[11px] font-medium text-emerald-700">Recepcionista asignado</span>
-                          : <button className="rounded-md bg-[#870b30] px-3 py-2 text-[11px] font-medium text-white hover:bg-[#6f0827] disabled:cursor-not-allowed disabled:opacity-50" disabled={!canManageUsers || !receptionistRole || isSelf || savingUserId === user.id} onClick={() => void assignReceptionist(user)} type="button">
-                            {savingUserId === user.id ? 'Asignando...' : isSelf ? 'No disponible para ti' : canManageUsers ? 'Asignar recepcionista' : 'Sin permiso para asignar'}
-                          </button>}
+                        <div className="flex flex-wrap gap-1.5">
+                          {assignableRoles.map((role) => {
+                            const alreadyAssigned = user.roles.some((userRole) => userRole.id === role.id)
+                            return <button
+                              className={`rounded-md px-2.5 py-1.5 text-[10px] font-medium disabled:cursor-not-allowed disabled:opacity-50 ${alreadyAssigned ? 'border border-emerald-200 bg-emerald-50 text-emerald-700' : 'bg-[#870b30] text-white hover:bg-[#6f0827]'}`}
+                              disabled={!canManageUsers || alreadyAssigned || isSelf || savingUserId === user.id}
+                              key={role.id}
+                              onClick={() => void assignRole(user, role)}
+                              type="button"
+                            >
+                              {savingUserId === user.id ? 'Asignando...' : alreadyAssigned ? `${role.name} asignado` : `Asignar ${role.name.toLowerCase()}`}
+                            </button>
+                          })}
+                          {isSelf && <span className="text-[10px] text-slate-500">No puedes modificar tus propios roles.</span>}
+                        </div>
                       </td>
                     </tr>
                   )

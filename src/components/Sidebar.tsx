@@ -19,13 +19,16 @@ export function Sidebar({
   page,
   onNavigate,
   showUnconnectedModules,
+  isAdministrator,
 }: {
   page: Page
   onNavigate: (nextPage: Page) => void
   showUnconnectedModules: boolean
+  isAdministrator: boolean
 }) {
   const visibleNavigation = navigation.filter((item) =>
-    showUnconnectedModules || isEndpointConnectedPage(item.label),
+    (item.label !== 'Usuarios y roles' || isAdministrator)
+      && (showUnconnectedModules || isEndpointConnectedPage(item.label)),
   )
 
   return (

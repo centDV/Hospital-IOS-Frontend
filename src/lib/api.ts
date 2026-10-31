@@ -426,18 +426,27 @@ export async function issuePrescription(input: {
   }
 }
 
-export async function createClinicalObservation(input: {
+export async function createClinicalNote(input: {
   encounterId: string
-  observation: string
+  subjective: string
+  objective: string
+  assessment: string
+  plan: string
   requestKey: string
 }): Promise<void> {
   if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const noteValues = Object.fromEntries(
+    (['subjective', 'objective', 'assessment', 'plan'] as const)
+      .map((field) => [field, input[field].trim()])
+      .filter(([, value]) => value.length > 0),
+  )
+  if (Object.keys(noteValues).length === 0) throw new Error('Escribe al menos una sección de la nota clínica.')
   const { data: note, error: createError } = await supabase.rpc('create_record', {
     p_resource: 'clinical_notes',
     p_values: {
       encounter_id: input.encounterId,
       kind: 'consultation',
-      objective: input.observation,
+      ...noteValues,
     },
     p_request_key: input.requestKey,
   })

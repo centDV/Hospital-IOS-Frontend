@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../components/Icon'
 import {
-  createClinicalObservation,
+  createClinicalNote,
   issuePrescription,
   readPatientChart,
   readPrescriptionCatalogs,
@@ -86,6 +86,15 @@ function formatValue(value: unknown, key = ''): string {
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase()
     if (normalized === 'unknown') return 'No especificado'
+    if (key === 'sex' || key === 'administrative_sex') {
+      const sexes: Record<string, string> = {
+        female: 'Femenino',
+        male: 'Masculino',
+        intersex: 'Intersexual',
+        unknown: 'No especificado',
+      }
+      if (sexes[normalized]) return sexes[normalized]
+    }
     if (key === 'status') return statusLabels[normalized] ?? value.replaceAll('_', ' ')
     if (key === 'kind') {
       const kinds: Record<string, string> = {
@@ -170,8 +179,8 @@ function ChartItem({ item, sectionKey }: { item: unknown; sectionKey: string }) 
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {details.map(([key, value]) => (
             <div className={key === 'instructions' || key === 'narrative' ? 'sm:col-span-2' : ''} key={key}>
-              <dt className="text-[11px] font-semibold text-slate-500">{formatLabel(key)}</dt>
-              <dd className="mt-1 break-words text-sm leading-relaxed text-slate-700">{formatValue(value, key)}</dd>
+              <dt className="block text-[11px] font-semibold text-slate-500">{formatLabel(key)}:</dt>
+              <dd className="mt-1 block break-words text-sm leading-relaxed text-slate-700">{formatValue(value, key)}</dd>
             </div>
           ))}
         </dl>
@@ -253,7 +262,12 @@ export function ClinicalRecordPage({
   const [observationSuccess, setObservationSuccess] = useState('')
   const [savingPrescription, setSavingPrescription] = useState(false)
   const [savingObservation, setSavingObservation] = useState(false)
-  const [observation, setObservation] = useState('')
+  const [clinicalNote, setClinicalNote] = useState({
+    subjective: '',
+    objective: '',
+    assessment: '',
+    plan: '',
+  })
   const [prescription, setPrescription] = useState({
     medicationId: '',
     dose: '',
@@ -348,13 +362,16 @@ export function ClinicalRecordPage({
     setObservationSuccess('')
     setSavingObservation(true)
     try {
-      await createClinicalObservation({
+      await createClinicalNote({
         encounterId: String(openEncounter.id),
-        observation: observation.trim(),
+        subjective: clinicalNote.subjective.trim(),
+        objective: clinicalNote.objective.trim(),
+        assessment: clinicalNote.assessment.trim(),
+        plan: clinicalNote.plan.trim(),
         requestKey: globalThis.crypto.randomUUID(),
       })
-      setObservationSuccess('Observación guardada y firmada.')
-      setObservation('')
+      setObservationSuccess('Nota clínica guardada y firmada.')
+      setClinicalNote({ subjective: '', objective: '', assessment: '', plan: '' })
       setShowObservationForm(false)
       setRefreshVersion((version) => version + 1)
     } catch (saveError: unknown) {
@@ -384,7 +401,7 @@ export function ClinicalRecordPage({
                 <p className="mt-1 text-xs text-slate-500">Expediente: {formatValue(patient.record_number ?? patient.medical_record_number)}</p>
                 <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
                   <p><span className="text-slate-400">Nacimiento: </span><span className="text-slate-700">{formatValue(patient.birth_date)}</span></p>
-                  <p><span className="text-slate-400">Sexo: </span><span className="text-slate-700">{formatValue(patient.sex ?? patient.administrative_sex)}</span></p>
+                  <p><span className="text-slate-400">Sexo: </span><span className="text-slate-700">{formatValue(patient.sex ?? patient.administrative_sex, patient.sex !== undefined ? 'sex' : 'administrative_sex')}</span></p>
                   <p><span className="text-slate-400">Teléfono: </span><span className="text-slate-700">{formatValue(patient.phone)}</span></p>
                   <p><span className="text-slate-400">Tipo de sangre: </span><span className="text-slate-700">{formatValue(chart.blood_type ?? chart.blood_group, 'blood_type')}</span></p>
                 </div>
@@ -398,12 +415,12 @@ export function ClinicalRecordPage({
                 <div>
                   <h3 className="text-sm font-semibold text-slate-800">Atención clínica</h3>
                   <p className="mt-1 text-xs text-slate-500">
-                    {isRecord(openEncounter) ? 'Puedes agregar una receta u observación a la atención abierta.' : 'No hay una atención abierta de este médico para agregar registros.'}
+                    {isRecord(openEncounter) ? 'Puedes documentar la consulta y emitir recetas en la atención abierta.' : 'No hay una atención abierta de este médico para agregar registros. Recepción programa la cita; el registro clínico se habilita al iniciar la atención.'}
                   </p>
                 </div>
                 {isRecord(openEncounter) && (
                   <div className="flex gap-2">
-                    <button className="rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => setShowObservationForm((show) => !show)} type="button">Agregar observación</button>
+                    <button className="rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => setShowObservationForm((show) => !show)} type="button">Agregar nota clínica</button>
                     <button className="rounded-md bg-[#870b30] px-3 py-2 text-xs font-medium text-white hover:bg-[#6f0826]" onClick={() => {
                       setPrescription((current) => ({ ...current, startsOn: current.startsOn || getLocalDateInputValue() }))
                       setShowPrescriptionForm((show) => !show)
@@ -418,10 +435,27 @@ export function ClinicalRecordPage({
 
               {showObservationForm && isRecord(openEncounter) && (
                 <form className="mt-4 space-y-3 border-t border-slate-100 pt-4" onSubmit={(event) => void submitObservation(event)}>
-                  <label className="block text-xs font-medium text-slate-700" htmlFor="clinical-observation">Observación clínica</label>
-                  <textarea className="min-h-24 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#870b30]" id="clinical-observation" maxLength={10000} onChange={(event) => setObservation(event.target.value)} required value={observation} />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {([
+                      ['subjective', 'Síntomas y relato'],
+                      ['objective', 'Hallazgos'],
+                      ['assessment', 'Evaluación'],
+                      ['plan', 'Plan'],
+                    ] as const).map(([field, label]) => (
+                      <label className="block text-xs font-medium text-slate-700" htmlFor={`clinical-note-${field}`} key={field}>
+                        {label}
+                        <textarea
+                          className="mt-1.5 min-h-20 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#870b30]"
+                          id={`clinical-note-${field}`}
+                          maxLength={10000}
+                          onChange={(event) => setClinicalNote((current) => ({ ...current, [field]: event.target.value }))}
+                          value={clinicalNote[field]}
+                        />
+                      </label>
+                    ))}
+                  </div>
                   {observationError && <p className="text-xs text-rose-700" role="alert">{observationError}</p>}
-                  <button className="rounded-md bg-[#870b30] px-3 py-2 text-xs font-medium text-white disabled:opacity-50" disabled={savingObservation} type="submit">{savingObservation ? 'Guardando...' : 'Guardar y firmar observación'}</button>
+                  <button className="rounded-md bg-[#870b30] px-3 py-2 text-xs font-medium text-white disabled:opacity-50" disabled={savingObservation} type="submit">{savingObservation ? 'Guardando...' : 'Guardar y firmar nota clínica'}</button>
                 </form>
               )}
 
