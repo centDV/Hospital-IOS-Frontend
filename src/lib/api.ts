@@ -59,6 +59,7 @@ export interface HospitalOverview {
 }
 
 export interface UserAccess {
+  profileId: string | null
   roles: Array<{ facilityId: string; code: string }>
   permissions: Array<{ facilityId: string; code: string }>
 }
@@ -94,6 +95,21 @@ export interface DoctorAppointment {
 export interface AppointmentTimeBlock {
   period: string
   status: string
+}
+
+export interface ManagedUser {
+  id: string
+  email: string
+  givenNames: string
+  familyNames: string
+  status: string
+  roles: Array<{ id: string; code: string; name: string }>
+}
+
+export interface SystemRole {
+  id: string
+  code: string
+  name: string
 }
 
 export interface PrescriptionCatalogs {
@@ -157,6 +173,7 @@ export async function readMyAccess(): Promise<UserAccess> {
     throw new Error('Permisos del usuario: respuesta con formato inválido.')
   }
   return {
+    profileId: isRecord(data.profile) && typeof data.profile.id === 'string' ? data.profile.id : null,
     roles: data.roles.map((value) => {
       if (!isRecord(value)) throw new Error('Permisos del usuario: rol con formato inválido.')
       return {
@@ -268,6 +285,61 @@ export async function scheduleAppointmentRequest(input: {
   if (!isRecord(data) || typeof data.appointment_id !== 'string') {
     throw new Error('La programación no devolvió un identificador de cita válido.')
   }
+}
+
+export async function searchManagedUsers(
+  facilityId: string,
+  query: string,
+  after: string | null = null,
+): Promise<{ users: ManagedUser[]; after: string | null }> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data, error } = await supabase.rpc('search_users', {
+    p_facility: facilityId,
+    p_filters: query.trim() ? { query: query.trim() } : {},
+    p_limit: 50,
+    p_after: after,
+  })
+  if (error) throw error
+  if (!isRecord(data) || !Array.isArray(data.data)) {
+    throw new Error('Directorio de usuarios: respuesta con formato inválido.')
+  }
+  const users = parseRows(data.data, 'Directorio de usuarios', (row) => ({
+    id: requiredString(row, 'id', 'Directorio de usuarios'),
+    email: optionalString(row, 'email', 'Directorio de usuarios') ?? '',
+    givenNames: optionalString(row, 'given_names', 'Directorio de usuarios') ?? '',
+    familyNames: optionalString(row, 'family_names', 'Directorio de usuarios') ?? '',
+    status: requiredString(row, 'status', 'Directorio de usuarios'),
+    roles: parseRows(row.roles, 'Roles del usuario', (role) => ({
+      id: requiredString(role, 'id', 'Roles del usuario'),
+      code: requiredString(role, 'code', 'Roles del usuario'),
+      name: requiredString(role, 'name', 'Roles del usuario'),
+    })),
+  }))
+  return {
+    users,
+    after: typeof data.after === 'string' ? data.after : null,
+  }
+}
+
+export async function readSystemRoles(facilityId: string): Promise<SystemRole[]> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data, error } = await supabase.rpc('access_roles', { p_facility: facilityId })
+  if (error) throw error
+  return parseRows(data, 'Roles del sistema', (row) => ({
+    id: requiredString(row, 'id', 'Roles del sistema'),
+    code: requiredString(row, 'code', 'Roles del sistema'),
+    name: requiredString(row, 'name', 'Roles del sistema'),
+  }))
+}
+
+export async function setUserRoles(profileId: string, facilityId: string, roleIds: string[]): Promise<void> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { error } = await supabase.rpc('set_user_roles', {
+    p_profile: profileId,
+    p_facility: facilityId,
+    p_roles: roleIds,
+  })
+  if (error) throw error
 }
 
 export async function readPatientChart(patientId: string, isDoctor: boolean): Promise<PatientChart> {
