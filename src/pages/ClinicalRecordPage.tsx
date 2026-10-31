@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../components/Icon'
-import { readPatientChart, type PatientChart } from '../lib/api'
+import {
+  createClinicalObservation,
+  issuePrescription,
+  readPatientChart,
+  readPrescriptionCatalogs,
+  type PatientChart,
+  type PrescriptionCatalogs,
+} from '../lib/api'
 
 const chartSections = [
   { key: 'history', title: 'Consultas y evolución' },
@@ -53,6 +60,7 @@ const statusLabels: Record<string, string> = {
   completed: 'Completado',
   draft: 'Borrador',
   in_progress: 'En proceso',
+  open: 'Abierta',
   ordered: 'Solicitado',
   resolved: 'Resuelta',
   signed: 'Firmada',
@@ -60,6 +68,13 @@ const statusLabels: Record<string, string> = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function getLocalDateInputValue(): string {
+  const date = new Date()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
 }
 
 function formatLabel(key: string): string {
@@ -227,6 +242,29 @@ export function ClinicalRecordPage({
   onBack: () => void
 }) {
   const [response, setResponse] = useState<{ key: string; chart: PatientChart | null; error: string } | null>(null)
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  const [catalogs, setCatalogs] = useState<PrescriptionCatalogs | null>(null)
+  const [catalogError, setCatalogError] = useState('')
+  const [showPrescriptionForm, setShowPrescriptionForm] = useState(false)
+  const [showObservationForm, setShowObservationForm] = useState(false)
+  const [prescriptionError, setPrescriptionError] = useState('')
+  const [observationError, setObservationError] = useState('')
+  const [prescriptionSuccess, setPrescriptionSuccess] = useState('')
+  const [observationSuccess, setObservationSuccess] = useState('')
+  const [savingPrescription, setSavingPrescription] = useState(false)
+  const [savingObservation, setSavingObservation] = useState(false)
+  const [observation, setObservation] = useState('')
+  const [prescription, setPrescription] = useState({
+    medicationId: '',
+    dose: '',
+    doseUnitId: '',
+    routeId: '',
+    intervalHours: '',
+    instructions: '',
+    startsOn: '',
+    endsOn: '',
+    quantity: '',
+  })
   const responseKey = `${patientId ?? ''}:${isDoctor}`
   const currentResponse = response?.key === responseKey ? response : null
   const chart = currentResponse?.chart ?? null
@@ -249,12 +287,82 @@ export function ClinicalRecordPage({
     return () => {
       active = false
     }
-  }, [isDoctor, patientId, responseKey])
+  }, [isDoctor, patientId, responseKey, refreshVersion])
+
+  useEffect(() => {
+    if (!isDoctor) return
+    let active = true
+    readPrescriptionCatalogs().then((result) => {
+      if (active) setCatalogs(result)
+    }).catch((loadError: unknown) => {
+      if (active) setCatalogError(loadError instanceof Error ? loadError.message : 'No se pudieron cargar los catálogos de medicamentos.')
+    })
+    return () => {
+      active = false
+    }
+  }, [isDoctor])
 
   const patient = chart && isRecord(chart.patient) ? chart.patient : null
   const patientName = patient
     ? formatValue(patient.full_name ?? [patient.given_names, patient.family_names].filter((part) => typeof part === 'string').join(' '))
     : ''
+  const openEncounter = getSectionItems(chart ?? {}, 'history').find((item) =>
+    isRecord(item) && item.status === 'open' && typeof item.id === 'string',
+  )
+
+  async function submitPrescription(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!isRecord(openEncounter) || !catalogs) return
+    setPrescriptionError('')
+    setPrescriptionSuccess('')
+    setSavingPrescription(true)
+    try {
+      await issuePrescription({
+        encounterId: String(openEncounter.id),
+        medicationId: prescription.medicationId,
+        dose: Number(prescription.dose),
+        doseUnitId: prescription.doseUnitId,
+        routeId: prescription.routeId,
+        intervalHours: prescription.intervalHours ? Number(prescription.intervalHours) : null,
+        instructions: prescription.instructions.trim(),
+        startsOn: prescription.startsOn,
+        endsOn: prescription.endsOn || null,
+        quantity: prescription.quantity ? Number(prescription.quantity) : null,
+        requestKey: globalThis.crypto.randomUUID(),
+      })
+      setPrescriptionSuccess('Receta emitida correctamente.')
+      setShowPrescriptionForm(false)
+      setPrescription({ ...prescription, dose: '', instructions: '' })
+      setRefreshVersion((version) => version + 1)
+    } catch (saveError: unknown) {
+      setPrescriptionError(saveError instanceof Error ? saveError.message : 'No se pudo emitir la receta.')
+    } finally {
+      setSavingPrescription(false)
+    }
+  }
+
+  async function submitObservation(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!isRecord(openEncounter)) return
+    setObservationError('')
+    setObservationSuccess('')
+    setSavingObservation(true)
+    try {
+      await createClinicalObservation({
+        encounterId: String(openEncounter.id),
+        observation: observation.trim(),
+        requestKey: globalThis.crypto.randomUUID(),
+      })
+      setObservationSuccess('Observación guardada y firmada.')
+      setObservation('')
+      setShowObservationForm(false)
+      setRefreshVersion((version) => version + 1)
+    } catch (saveError: unknown) {
+      setObservationError(saveError instanceof Error ? saveError.message : 'No se pudo guardar la observación.')
+    } finally {
+      setSavingObservation(false)
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -283,6 +391,84 @@ export function ClinicalRecordPage({
               </div>
             </div>
           </section>
+
+          {isDoctor && (
+            <section className="rounded-xl border border-slate-100 bg-white p-4 shadow-[0_2px_10px_rgba(15,23,42,0.025)]">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800">Atención clínica</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {isRecord(openEncounter) ? 'Puedes agregar una receta u observación a la atención abierta.' : 'No hay una atención abierta de este médico para agregar registros.'}
+                  </p>
+                </div>
+                {isRecord(openEncounter) && (
+                  <div className="flex gap-2">
+                    <button className="rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => setShowObservationForm((show) => !show)} type="button">Agregar observación</button>
+                    <button className="rounded-md bg-[#870b30] px-3 py-2 text-xs font-medium text-white hover:bg-[#6f0826]" onClick={() => {
+                      setPrescription((current) => ({ ...current, startsOn: current.startsOn || getLocalDateInputValue() }))
+                      setShowPrescriptionForm((show) => !show)
+                    }} type="button">Agregar receta</button>
+                  </div>
+                )}
+              </div>
+
+              {catalogError && <p className="mt-3 rounded-md bg-rose-50 p-2 text-xs text-rose-800" role="alert">{catalogError}</p>}
+              {observationSuccess && <p className="mt-3 rounded-md bg-emerald-50 p-2 text-xs text-emerald-800" role="status">{observationSuccess}</p>}
+              {prescriptionSuccess && <p className="mt-3 rounded-md bg-emerald-50 p-2 text-xs text-emerald-800" role="status">{prescriptionSuccess}</p>}
+
+              {showObservationForm && isRecord(openEncounter) && (
+                <form className="mt-4 space-y-3 border-t border-slate-100 pt-4" onSubmit={(event) => void submitObservation(event)}>
+                  <label className="block text-xs font-medium text-slate-700" htmlFor="clinical-observation">Observación clínica</label>
+                  <textarea className="min-h-24 w-full rounded-md border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#870b30]" id="clinical-observation" maxLength={10000} onChange={(event) => setObservation(event.target.value)} required value={observation} />
+                  {observationError && <p className="text-xs text-rose-700" role="alert">{observationError}</p>}
+                  <button className="rounded-md bg-[#870b30] px-3 py-2 text-xs font-medium text-white disabled:opacity-50" disabled={savingObservation} type="submit">{savingObservation ? 'Guardando...' : 'Guardar y firmar observación'}</button>
+                </form>
+              )}
+
+              {showPrescriptionForm && isRecord(openEncounter) && (
+                <form className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2" onSubmit={(event) => void submitPrescription(event)}>
+                  <label className="space-y-1 text-xs font-medium text-slate-700 sm:col-span-2">Medicamento
+                    <select className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" onChange={(event) => setPrescription({ ...prescription, medicationId: event.target.value })} required value={prescription.medicationId}>
+                      <option value="">Selecciona un medicamento</option>
+                      {catalogs?.medications.map((medication) => <option key={medication.id} value={medication.id}>{medication.name}{medication.strength ? ` · ${medication.strength}` : ''}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs font-medium text-slate-700">Dosis
+                    <input className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" min="0.0001" onChange={(event) => setPrescription({ ...prescription, dose: event.target.value })} required step="any" type="number" value={prescription.dose} />
+                  </label>
+                  <label className="space-y-1 text-xs font-medium text-slate-700">Unidad de dosis
+                    <select className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" onChange={(event) => setPrescription({ ...prescription, doseUnitId: event.target.value })} required value={prescription.doseUnitId}>
+                      <option value="">Selecciona unidad</option>
+                      {catalogs?.units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs font-medium text-slate-700">Vía de administración
+                    <select className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm" onChange={(event) => setPrescription({ ...prescription, routeId: event.target.value })} required value={prescription.routeId}>
+                      <option value="">Selecciona vía</option>
+                      {catalogs?.routes.map((route) => <option key={route.id} value={route.id}>{route.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs font-medium text-slate-700">Intervalo (horas)
+                    <input className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" min="0.1" onChange={(event) => setPrescription({ ...prescription, intervalHours: event.target.value })} step="any" type="number" value={prescription.intervalHours} />
+                  </label>
+                  <label className="space-y-1 text-xs font-medium text-slate-700">Cantidad
+                    <input className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" min="0.0001" onChange={(event) => setPrescription({ ...prescription, quantity: event.target.value })} step="any" type="number" value={prescription.quantity} />
+                  </label>
+                  <label className="space-y-1 text-xs font-medium text-slate-700">Fecha de inicio
+                    <input className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" onChange={(event) => setPrescription({ ...prescription, startsOn: event.target.value })} required type="date" value={prescription.startsOn} />
+                  </label>
+                  <label className="space-y-1 text-xs font-medium text-slate-700">Fecha de finalización
+                    <input className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" min={prescription.startsOn} onChange={(event) => setPrescription({ ...prescription, endsOn: event.target.value })} type="date" value={prescription.endsOn} />
+                  </label>
+                  <label className="space-y-1 text-xs font-medium text-slate-700 sm:col-span-2">Indicaciones
+                    <textarea className="min-h-20 w-full rounded-md border border-slate-200 px-3 py-2 text-sm" maxLength={2000} onChange={(event) => setPrescription({ ...prescription, instructions: event.target.value })} required value={prescription.instructions} />
+                  </label>
+                  {prescriptionError && <p className="text-xs text-rose-700 sm:col-span-2" role="alert">{prescriptionError}</p>}
+                  <button className="rounded-md bg-[#870b30] px-3 py-2 text-xs font-medium text-white disabled:opacity-50 sm:col-span-2" disabled={savingPrescription || !catalogs || catalogs.medications.length === 0 || catalogs.units.length === 0 || catalogs.routes.length === 0} type="submit">{savingPrescription ? 'Emitiendo...' : 'Emitir receta'}</button>
+                </form>
+              )}
+            </section>
+          )}
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {chartSections.map(({ key, title }) => {

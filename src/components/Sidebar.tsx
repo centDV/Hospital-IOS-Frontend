@@ -6,7 +6,6 @@ const navigation: { label: Page; icon: IconName }[] = [
   { label: 'Resumen general', icon: 'grid' },
   { label: 'Usuarios y roles', icon: 'users' },
   { label: 'Pacientes e ingresos', icon: 'patient' },
-  { label: 'Expediente Clínico', icon: 'file' },
   { label: 'Citas y Turnos', icon: 'calendar' },
   { label: 'Habitaciones y Camas', icon: 'bed' },
   { label: 'Turnos del Personal', icon: 'clock' },

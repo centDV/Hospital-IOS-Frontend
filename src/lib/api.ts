@@ -60,9 +60,47 @@ export interface HospitalOverview {
 
 export interface UserAccess {
   roles: Array<{ facilityId: string; code: string }>
+  permissions: Array<{ facilityId: string; code: string }>
 }
 
 export type PatientChart = Record<string, unknown>
+
+export interface AppointmentRequest {
+  id: string
+  patientId: string
+  patientName: string
+  recordNumber: string | null
+  facilityId: string
+  specialtyId: string
+  specialtyName: string
+  reason: string
+  preferredDate: string
+  preferredStart: string | null
+  preferredEnd: string | null
+  rowVersion: number
+}
+
+export interface DoctorAppointment {
+  id: string
+  patientId: string
+  patientName: string
+  recordNumber: string
+  phone: string | null
+  period: string
+  status: string
+  encounterId: string | null
+}
+
+export interface AppointmentTimeBlock {
+  period: string
+  status: string
+}
+
+export interface PrescriptionCatalogs {
+  medications: Array<{ id: string; name: string; strength: string | null }>
+  units: Array<{ id: string; name: string }>
+  routes: Array<{ id: string; name: string }>
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -126,6 +164,109 @@ export async function readMyAccess(): Promise<UserAccess> {
         code: requiredString(value, 'code', 'Permisos del usuario'),
       }
     }),
+    permissions: parseRows(data.permissions, 'Permisos del usuario', (value) => ({
+      facilityId: requiredString(value, 'facility_id', 'Permisos del usuario'),
+      code: requiredString(value, 'code', 'Permisos del usuario'),
+    })),
+  }
+}
+
+export async function readPendingAppointmentRequests(facilityId: string): Promise<AppointmentRequest[]> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data, error } = await supabase.schema('hospital').from('appointment_requests')
+    .select('id,patient_id,facility_id,specialty_id,reason,preferred_date,preferred_start,preferred_end,row_version,patients(medical_record_number,persons(given_names,family_names)),specialties(name)')
+    .eq('facility_id', facilityId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true })
+    .limit(50)
+  if (error) throw error
+  return parseRows(data, 'Solicitudes de atención', (row) => {
+    const patient = Array.isArray(row.patients) ? row.patients[0] : row.patients
+    const person = isRecord(patient) ? (Array.isArray(patient.persons) ? patient.persons[0] : patient.persons) : null
+    const specialty = Array.isArray(row.specialties) ? row.specialties[0] : row.specialties
+    const patientName = isRecord(person)
+      ? `${requiredString(person, 'given_names', 'Solicitudes de atención')} ${requiredString(person, 'family_names', 'Solicitudes de atención')}`.trim()
+      : ''
+    return {
+      id: requiredString(row, 'id', 'Solicitudes de atención'),
+      patientId: requiredString(row, 'patient_id', 'Solicitudes de atención'),
+      patientName: patientName || 'Paciente',
+      recordNumber: isRecord(patient) && typeof patient.medical_record_number === 'string' ? patient.medical_record_number : null,
+      facilityId: requiredString(row, 'facility_id', 'Solicitudes de atención'),
+      specialtyId: requiredString(row, 'specialty_id', 'Solicitudes de atención'),
+      specialtyName: isRecord(specialty) && typeof specialty.name === 'string' ? specialty.name : 'Especialidad no disponible',
+      reason: requiredString(row, 'reason', 'Solicitudes de atención'),
+      preferredDate: requiredString(row, 'preferred_date', 'Solicitudes de atención'),
+      preferredStart: optionalString(row, 'preferred_start', 'Solicitudes de atención'),
+      preferredEnd: optionalString(row, 'preferred_end', 'Solicitudes de atención'),
+      rowVersion: requiredNumber(row, 'row_version', 'Solicitudes de atención'),
+    }
+  })
+}
+
+export async function readDoctorAppointments(facilityId: string, from: string, to: string): Promise<DoctorAppointment[]> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data, error } = await supabase.rpc('doctor_workspace', {
+    p_facility: facilityId,
+    p_from: from,
+    p_to: to,
+  })
+  if (error) throw error
+  if (!isRecord(data)) throw new Error('Agenda médica: respuesta con formato inválido.')
+  return parseRows(data.appointments, 'Agenda médica', (row) => ({
+    id: requiredString(row, 'id', 'Agenda médica'),
+    patientId: requiredString(row, 'patient_id', 'Agenda médica'),
+    patientName: requiredString(row, 'patient_name', 'Agenda médica'),
+    recordNumber: requiredString(row, 'record_number', 'Agenda médica'),
+    phone: optionalString(row, 'phone', 'Agenda médica'),
+    period: requiredString(row, 'period', 'Agenda médica'),
+    status: requiredString(row, 'status', 'Agenda médica'),
+    encounterId: optionalString(row, 'encounter_id', 'Agenda médica'),
+  }))
+}
+
+export async function readDoctorAvailability(physicianId: string, date: string): Promise<AppointmentTimeBlock[]> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const start = new Date(`${date}T00:00:00`)
+  if (Number.isNaN(start.getTime())) throw new Error('La fecha seleccionada para consultar disponibilidad no es válida.')
+  const end = new Date(start)
+  end.setDate(end.getDate() + 1)
+  const from = start.toISOString()
+  const to = end.toISOString()
+  const { data, error } = await supabase.schema('hospital').from('appointments')
+    .select('period,status')
+    .eq('physician_id', physicianId)
+    .filter('period', 'ov', `[${from},${to})`)
+  if (error) throw error
+  return parseRows(data, 'Disponibilidad médica', (row) => ({
+    period: requiredString(row, 'period', 'Disponibilidad médica'),
+    status: requiredString(row, 'status', 'Disponibilidad médica'),
+  })).filter((block) => block.status !== 'cancelled')
+}
+
+export async function scheduleAppointmentRequest(input: {
+  requestId: string
+  departmentId: string
+  physicianId: string
+  startsAt: string
+  endsAt: string
+  expectedVersion: number
+  requestKey: string
+}): Promise<void> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data, error } = await supabase.rpc('schedule_appointment_request', {
+    p_id: input.requestId,
+    p_department: input.departmentId,
+    p_physician: input.physicianId,
+    p_starts_at: input.startsAt,
+    p_ends_at: input.endsAt,
+    p_room: null,
+    p_expected_version: input.expectedVersion,
+    p_request_key: input.requestKey,
+  })
+  if (error) throw error
+  if (!isRecord(data) || typeof data.appointment_id !== 'string') {
+    throw new Error('La programación no devolvió un identificador de cita válido.')
   }
 }
 
@@ -144,6 +285,116 @@ export async function readPatientChart(patientId: string, isDoctor: boolean): Pr
     throw new Error('Expediente clínico: respuesta con formato inválido.')
   }
   return data
+}
+
+export async function readPrescriptionCatalogs(): Promise<PrescriptionCatalogs> {
+  const [medicationRows, unitRows, routeRows] = await Promise.all([
+    readPublicView('catalog_medications'),
+    readPublicView('catalog_units'),
+    readPublicView('catalog_administration_routes'),
+  ])
+  return {
+    medications: parseRows(medicationRows, 'Medicamentos', (row) => {
+      if (typeof row.active !== 'boolean') throw new Error('Medicamentos: campo "active" inválido.')
+      const strength = row.strength
+      if (strength !== null && strength !== undefined && typeof strength !== 'string'
+        && (typeof strength !== 'number' || !Number.isFinite(strength))) {
+        throw new Error('Medicamentos: campo "strength" inválido.')
+      }
+      return {
+        id: requiredString(row, 'id', 'Medicamentos'),
+        name: requiredString(row, 'generic_name', 'Medicamentos'),
+        strength: strength === null || strength === undefined ? null : String(strength),
+        active: row.active,
+      }
+    }).filter((medication) => medication.active),
+    units: parseRows(unitRows, 'Unidades', (row) => ({
+      id: requiredString(row, 'id', 'Unidades'),
+      name: requiredString(row, 'name', 'Unidades'),
+    })),
+    routes: parseRows(routeRows, 'Vías de administración', (row) => ({
+      id: requiredString(row, 'id', 'Vías de administración'),
+      name: requiredString(row, 'name', 'Vías de administración'),
+    })),
+  }
+}
+
+export async function issuePrescription(input: {
+  encounterId: string
+  medicationId: string
+  dose: number
+  doseUnitId: string
+  routeId: string
+  intervalHours: number | null
+  instructions: string
+  startsOn: string
+  endsOn: string | null
+  quantity: number | null
+  requestKey: string
+}): Promise<void> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data, error } = await supabase.rpc('mobile_issue_prescription', {
+    p_encounter: input.encounterId,
+    p_request_key: input.requestKey,
+    p_items: [{
+      medication_id: input.medicationId,
+      dose: input.dose,
+      dose_unit_id: input.doseUnitId,
+      route_id: input.routeId,
+      interval_hours: input.intervalHours,
+      instructions: input.instructions,
+      starts_on: input.startsOn,
+      ends_on: input.endsOn,
+      quantity: input.quantity,
+    }],
+  })
+  if (error) throw error
+  if (!isRecord(data) || typeof data.id !== 'string') {
+    throw new Error('La receta no devolvió un identificador válido.')
+  }
+}
+
+export async function createClinicalObservation(input: {
+  encounterId: string
+  observation: string
+  requestKey: string
+}): Promise<void> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data: note, error: createError } = await supabase.rpc('create_record', {
+    p_resource: 'clinical_notes',
+    p_values: {
+      encounter_id: input.encounterId,
+      kind: 'consultation',
+      objective: input.observation,
+    },
+    p_request_key: input.requestKey,
+  })
+  if (createError) throw createError
+  if (!isRecord(note) || typeof note.id !== 'string' || typeof note.row_version !== 'number') {
+    throw new Error('La observación no devolvió los datos de versión esperados.')
+  }
+  const { error: signError } = await supabase.rpc('finalize_clinical_record', {
+    p_resource: 'clinical_notes',
+    p_id: note.id,
+    p_action: 'sign',
+    p_expected_version: note.row_version,
+  })
+  if (signError) throw signError
+}
+
+export async function rejectAppointmentRequest(requestId: string, expectedVersion: number, reason: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data, error } = await supabase.rpc('resolve_appointment_request', {
+    p_id: requestId,
+    p_status: 'rejected',
+    p_appointment: null,
+    p_reason: reason.trim() || null,
+    p_expected_version: expectedVersion,
+  })
+  if (error) throw error
+  if (!isRecord(data) || data.status !== 'rejected') {
+    throw new Error('La solicitud no confirmó el rechazo.')
+  }
 }
 
 export async function readPatients(facilityId: string, query: string, after: string | null): Promise<PatientRecord[]> {
