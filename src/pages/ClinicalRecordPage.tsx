@@ -74,6 +74,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+function getLoadErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (isRecord(error) && typeof error.message === 'string') {
+    const code = typeof error.code === 'string' ? ` (${error.code})` : ''
+    return `${error.message}${code}`
+  }
+  return 'No se pudo cargar el expediente clínico.'
+}
+
 function getLocalDateInputValue(): string {
   const date = new Date()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -306,7 +315,7 @@ export function ClinicalRecordPage({
       if (active) setResponse({
         key: responseKey,
         chart: null,
-        error: loadError instanceof Error ? loadError.message : 'No se pudo cargar el expediente clínico.',
+        error: getLoadErrorMessage(loadError),
       })
     })
     return () => {

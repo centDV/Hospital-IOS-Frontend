@@ -29,6 +29,10 @@ WHERE routine.routine_schema = 'public'
     'operational_dashboard',
     'patient_chart',
     'read_resource',
+    'list_assignable_physicians',
+    'register_patient_appointment_request',
+    'receptionist_doctor_availability',
+    'receptionist_pending_appointment_requests',
     'search_admissions',
     'search_patients'
   )

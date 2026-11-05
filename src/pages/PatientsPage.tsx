@@ -7,7 +7,8 @@ import {
   readAdmissionPhysicians,
   readPatients,
   registerAdmission,
-  registerPatient,
+  readPublicView,
+  registerPatientWithAppointmentRequest,
   getAuthorizationErrorMessage,
   readMyAccess,
   type AdmissionDepartment,
@@ -86,6 +87,14 @@ export function PatientsPage({ onViewChart }: { onViewChart: (patientId: string,
   const [familyNames, setFamilyNames] = useState('')
   const [birthDate, setBirthDate] = useState('')
   const [sex, setSex] = useState<'female' | 'male' | 'intersex' | 'unknown'>('unknown')
+  const [appointmentSpecialties, setAppointmentSpecialties] = useState<Array<{ id: string; name: string }>>([])
+  const [appointmentSpecialtiesLoading, setAppointmentSpecialtiesLoading] = useState(false)
+  const [appointmentSpecialtiesError, setAppointmentSpecialtiesError] = useState('')
+  const [appointmentSpecialtyId, setAppointmentSpecialtyId] = useState('')
+  const [appointmentReason, setAppointmentReason] = useState('')
+  const [preferredDate, setPreferredDate] = useState(today)
+  const [preferredStart, setPreferredStart] = useState('09:00')
+  const [preferredEnd, setPreferredEnd] = useState('09:30')
   const [admissionCatalogs, setAdmissionCatalogs] = useState<{ departments: AdmissionDepartment[]; triageLevels: TriageLevel[] }>({ departments: [], triageLevels: [] })
   const [catalogResult, setCatalogResult] = useState<{ facilityId: string; error: string } | null>(null)
   const [selectedPatientId, setSelectedPatientId] = useState('')
@@ -161,6 +170,29 @@ export function PatientsPage({ onViewChart }: { onViewChart: (patientId: string,
   }, [facilityId, showAdmissionForm])
 
   useEffect(() => {
+    if (!showPatientForm || !facilityId) return
+    let active = true
+    readPublicView('catalog_specialties').then((rows) => {
+      const specialties = rows.map((row) => {
+        if (typeof row.id !== 'string' || typeof row.name !== 'string') {
+          throw new Error('Catálogo de especialidades: registro inválido.')
+        }
+        return { id: row.id, name: row.name }
+      })
+      if (!active) return
+      setAppointmentSpecialties(specialties)
+      setAppointmentSpecialtyId(specialties[0]?.id ?? '')
+    }).catch((loadError: unknown) => {
+      if (active) setAppointmentSpecialtiesError(loadError instanceof Error ? loadError.message : 'No se pudieron cargar las especialidades.')
+    }).finally(() => {
+      if (active) setAppointmentSpecialtiesLoading(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [facilityId, showPatientForm])
+
+  useEffect(() => {
     if (!showAdmissionForm || !facilityId || !selectedDepartmentId) {
       return
     }
@@ -193,6 +225,8 @@ export function PatientsPage({ onViewChart }: { onViewChart: (patientId: string,
     setActionError('')
     setActionSuccess('')
     setRequestKey('')
+    setAppointmentSpecialtiesLoading(true)
+    setAppointmentSpecialtiesError('')
     setShowPatientForm(true)
   }
 
@@ -216,17 +250,26 @@ export function PatientsPage({ onViewChart }: { onViewChart: (patientId: string,
   async function submitPatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!facilityId || !showWriteActions) return
+    if (preferredEnd <= preferredStart) {
+      setActionError('La hora de fin debe ser posterior a la hora de inicio.')
+      return
+    }
     setSubmitting(true)
     setActionError('')
     try {
       const key = requestKey || createRequestKey()
       setRequestKey(key)
-      await registerPatient({
+      await registerPatientWithAppointmentRequest({
         facilityId,
         givenNames: givenNames.trim(),
         familyNames: familyNames.trim(),
         birthDate: birthDate || null,
         sex,
+        specialtyId: appointmentSpecialtyId,
+        reason: appointmentReason.trim(),
+        preferredDate,
+        preferredStart,
+        preferredEnd,
         requestKey: key,
       })
       setShowPatientForm(false)
@@ -234,13 +277,17 @@ export function PatientsPage({ onViewChart }: { onViewChart: (patientId: string,
       setFamilyNames('')
       setBirthDate('')
       setSex('unknown')
+      setAppointmentReason('')
+      setPreferredDate(today)
+      setPreferredStart('09:00')
+      setPreferredEnd('09:30')
       setRequestKey('')
       setQuery('')
       setCursors([null])
       setReloadToken((current) => current + 1)
-      setActionSuccess('Paciente registrado correctamente.')
+      setActionSuccess('Paciente registrado y solicitud agregada a pendientes de asignación.')
     } catch (error) {
-      setActionError(getAuthorizationErrorMessage(error, 'patients.write') ?? (error instanceof Error ? error.message : 'No se pudo registrar al paciente.'))
+      setActionError(getAuthorizationErrorMessage(error, 'patients.write y appointments.all') ?? (error instanceof Error ? error.message : 'No se pudo registrar al paciente y su solicitud.'))
     } finally {
       setSubmitting(false)
     }
@@ -335,7 +382,7 @@ export function PatientsPage({ onViewChart }: { onViewChart: (patientId: string,
         )}
       </Panel>
       {showWriteActions && showPatientForm && (
-        <Dialog onClose={closeForms} title="Registrar nuevo paciente">
+        <Dialog onClose={closeForms} title="Registrar paciente y solicitar cita">
           <form className="space-y-3" onSubmit={(event) => void submitPatient(event)}>
             <label className="block text-[10px] text-slate-600">Nombres
               <input autoComplete="given-name" className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-[11px] outline-none focus:border-rose-300" maxLength={100} onChange={(event) => setGivenNames(event.target.value)} required value={givenNames} />
@@ -353,10 +400,35 @@ export function PatientsPage({ onViewChart }: { onViewChart: (patientId: string,
                 <option value="unknown">No especificado</option><option value="female">Femenino</option><option value="male">Masculino</option><option value="intersex">Intersexual</option>
               </select>
             </label>
+            <div className="border-t border-slate-100 pt-3">
+              <p className="mb-2 text-[11px] font-semibold text-slate-700">Solicitud para asignación de cita</p>
+              <label className="block text-[10px] text-slate-600">Especialidad
+                <select className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-[11px] outline-none focus:border-rose-300" disabled={appointmentSpecialtiesLoading || appointmentSpecialties.length === 0} onChange={(event) => setAppointmentSpecialtyId(event.target.value)} required value={appointmentSpecialtyId}>
+                  <option value="">{appointmentSpecialtiesLoading ? 'Cargando especialidades...' : 'Selecciona una especialidad'}</option>
+                  {appointmentSpecialties.map((specialty) => <option key={specialty.id} value={specialty.id}>{specialty.name}</option>)}
+                </select>
+              </label>
+              <label className="mt-2 block text-[10px] text-slate-600">Motivo de consulta
+                <textarea className="mt-1 w-full resize-y rounded-md border border-slate-200 px-3 py-2 text-[11px] outline-none focus:border-rose-300" maxLength={2000} onChange={(event) => setAppointmentReason(event.target.value)} required rows={3} value={appointmentReason} />
+              </label>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <label className="text-[10px] text-slate-600">Fecha preferida
+                  <input className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-[11px]" min={today} onChange={(event) => setPreferredDate(event.target.value)} required type="date" value={preferredDate} />
+                </label>
+                <label className="text-[10px] text-slate-600">Desde
+                  <input className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-[11px]" onChange={(event) => setPreferredStart(event.target.value)} required type="time" value={preferredStart} />
+                </label>
+                <label className="text-[10px] text-slate-600">Hasta
+                  <input className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-[11px]" onChange={(event) => setPreferredEnd(event.target.value)} required type="time" value={preferredEnd} />
+                </label>
+              </div>
+            </div>
+            {appointmentSpecialtiesError && <p className="rounded-md bg-rose-50 px-3 py-2 text-[10px] text-rose-800" role="alert">{appointmentSpecialtiesError}</p>}
+            {!appointmentSpecialtiesLoading && !appointmentSpecialtiesError && appointmentSpecialties.length === 0 && <p className="text-[10px] text-amber-700" role="status">No hay especialidades disponibles para crear la solicitud.</p>}
             {actionError && <p className="rounded-md bg-rose-50 px-3 py-2 text-[10px] text-rose-800" role="alert">{actionError}</p>}
             <div className="flex justify-end gap-2 pt-2">
               <button className="rounded-md border border-slate-200 px-3 py-2 text-[10px] text-slate-600 disabled:opacity-50" disabled={submitting} onClick={closeForms} type="button">Cancelar</button>
-              <button className="rounded-md bg-[#870b30] px-3 py-2 text-[10px] font-semibold text-white disabled:opacity-50" disabled={submitting} type="submit">{submitting ? 'Guardando...' : 'Guardar paciente'}</button>
+              <button className="rounded-md bg-[#870b30] px-3 py-2 text-[10px] font-semibold text-white disabled:opacity-50" disabled={submitting || appointmentSpecialtiesLoading || appointmentSpecialties.length === 0} type="submit">{submitting ? 'Guardando...' : 'Registrar y enviar a pendientes'}</button>
             </div>
           </form>
         </Dialog>

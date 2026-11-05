@@ -195,28 +195,19 @@ export async function readMyAccess(): Promise<UserAccess> {
 
 export async function readPendingAppointmentRequests(facilityId: string): Promise<AppointmentRequest[]> {
   if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.schema('hospital').from('appointment_requests')
-    .select('id,patient_id,facility_id,specialty_id,reason,preferred_date,preferred_start,preferred_end,row_version,patients(medical_record_number,persons(given_names,family_names)),specialties(name)')
-    .eq('facility_id', facilityId)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: true })
-    .limit(50)
+  const { data, error } = await supabase.rpc('receptionist_pending_appointment_requests', {
+    p_facility: facilityId,
+  })
   if (error) throw error
   return parseRows(data, 'Solicitudes de atención', (row) => {
-    const patient = Array.isArray(row.patients) ? row.patients[0] : row.patients
-    const person = isRecord(patient) ? (Array.isArray(patient.persons) ? patient.persons[0] : patient.persons) : null
-    const specialty = Array.isArray(row.specialties) ? row.specialties[0] : row.specialties
-    const patientName = isRecord(person)
-      ? `${requiredString(person, 'given_names', 'Solicitudes de atención')} ${requiredString(person, 'family_names', 'Solicitudes de atención')}`.trim()
-      : ''
     return {
       id: requiredString(row, 'id', 'Solicitudes de atención'),
       patientId: requiredString(row, 'patient_id', 'Solicitudes de atención'),
-      patientName: patientName || 'Paciente',
-      recordNumber: isRecord(patient) && typeof patient.medical_record_number === 'string' ? patient.medical_record_number : null,
+      patientName: requiredString(row, 'patient_name', 'Solicitudes de atención'),
+      recordNumber: optionalString(row, 'record_number', 'Solicitudes de atención'),
       facilityId: requiredString(row, 'facility_id', 'Solicitudes de atención'),
       specialtyId: requiredString(row, 'specialty_id', 'Solicitudes de atención'),
-      specialtyName: isRecord(specialty) && typeof specialty.name === 'string' ? specialty.name : 'Especialidad no disponible',
+      specialtyName: requiredString(row, 'specialty_name', 'Solicitudes de atención'),
       reason: requiredString(row, 'reason', 'Solicitudes de atención'),
       preferredDate: requiredString(row, 'preferred_date', 'Solicitudes de atención'),
       preferredStart: optionalString(row, 'preferred_start', 'Solicitudes de atención'),
@@ -247,18 +238,18 @@ export async function readDoctorAppointments(facilityId: string, from: string, t
   }))
 }
 
-export async function readDoctorAvailability(physicianId: string, date: string): Promise<AppointmentTimeBlock[]> {
+export async function readDoctorAvailability(facilityId: string, physicianId: string, date: string): Promise<AppointmentTimeBlock[]> {
   if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
   const start = new Date(`${date}T00:00:00`)
   if (Number.isNaN(start.getTime())) throw new Error('La fecha seleccionada para consultar disponibilidad no es válida.')
   const end = new Date(start)
   end.setDate(end.getDate() + 1)
-  const from = start.toISOString()
-  const to = end.toISOString()
-  const { data, error } = await supabase.schema('hospital').from('appointments')
-    .select('period,status')
-    .eq('physician_id', physicianId)
-    .filter('period', 'ov', `[${from},${to})`)
+  const { data, error } = await supabase.rpc('receptionist_doctor_availability', {
+    p_facility: facilityId,
+    p_physician: physicianId,
+    p_from: start.toISOString(),
+    p_to: end.toISOString(),
+  })
   if (error) throw error
   return parseRows(data, 'Disponibilidad médica', (row) => ({
     period: requiredString(row, 'period', 'Disponibilidad médica'),
@@ -562,28 +553,15 @@ export async function readAdmissionCatalogs(facilityId: string): Promise<{ depar
 
 export async function readAdmissionPhysicians(facilityId: string, departmentId: string): Promise<AdmissionPhysician[]> {
   if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
-  const { data, error } = await supabase.rpc('list_staff', {
+  const { data, error } = await supabase.rpc('list_assignable_physicians', {
     p_facility: facilityId,
-    p_query: '',
-    p_active: true,
     p_department: departmentId,
-    p_limit: 100,
-    p_after: null,
   })
   if (error) throw error
-  const staff = parseRows(data, 'Médicos asignados', (row) => {
-    if (!Array.isArray(row.assignments)) throw new Error('Médicos asignados: campo "assignments" inválido.')
-    return {
-      id: requiredString(row, 'id', 'Médicos asignados'),
-      name: `${requiredString(row, 'given_names', 'Médicos asignados')} ${requiredString(row, 'family_names', 'Médicos asignados')}`,
-      licensed: typeof row.license_number === 'string' && row.license_number.trim().length > 0,
-      assigned: row.assignments.some((assignment) =>
-        isRecord(assignment) && assignment.department_id === departmentId,
-      ),
-    }
-  })
-  return staff.filter((physician) => physician.licensed && physician.assigned && physician.name.trim().length > 0)
-    .map(({ id, name }) => ({ id, name }))
+  return parseRows(data, 'Médicos asignados', (row) => ({
+    id: requiredString(row, 'id', 'Médicos asignados'),
+    name: requiredString(row, 'name', 'Médicos asignados'),
+  }))
 }
 
 export async function registerPatient(input: {
@@ -606,6 +584,39 @@ export async function registerPatient(input: {
   if (error) throw error
   if (!isRecord(data) || typeof data.id !== 'string') {
     throw new Error('El registro de paciente no devolvió un identificador válido.')
+  }
+}
+
+export async function registerPatientWithAppointmentRequest(input: {
+  facilityId: string
+  givenNames: string
+  familyNames: string
+  birthDate: string | null
+  sex: 'female' | 'male' | 'intersex' | 'unknown'
+  specialtyId: string
+  reason: string
+  preferredDate: string
+  preferredStart: string
+  preferredEnd: string
+  requestKey: string
+}): Promise<void> {
+  if (!supabase) throw new Error('Supabase no está configurado. Revisa las variables de entorno.')
+  const { data, error } = await supabase.rpc('register_patient_appointment_request', {
+    p_facility: input.facilityId,
+    p_given_names: input.givenNames,
+    p_family_names: input.familyNames,
+    p_birth_date: input.birthDate,
+    p_sex: input.sex,
+    p_specialty: input.specialtyId,
+    p_reason: input.reason,
+    p_preferred_date: input.preferredDate,
+    p_preferred_start: input.preferredStart,
+    p_preferred_end: input.preferredEnd,
+    p_request_key: input.requestKey,
+  })
+  if (error) throw error
+  if (!isRecord(data) || typeof data.patient_id !== 'string' || typeof data.request_id !== 'string' || data.status !== 'pending') {
+    throw new Error('El registro no confirmó la solicitud pendiente de asignación.')
   }
 }
 

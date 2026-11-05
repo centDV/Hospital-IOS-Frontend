@@ -88,7 +88,10 @@ function HospitalApp({ session, onSignOut }: { session: Session; onSignOut: () =
               setPage('Expediente Clínico')
             }} />}
             {page === 'Expediente Clínico' && <ClinicalRecordPage onBack={() => navigate('Pacientes e ingresos')} patientId={chartPatient?.id ?? null} isDoctor={chartPatient?.isDoctor ?? false} />}
-            {page === 'Citas y Turnos' && <AppointmentsPage />}
+            {page === 'Citas y Turnos' && <AppointmentsPage onViewChart={(patientId) => {
+              setChartPatient({ id: patientId, isDoctor: true })
+              setPage('Expediente Clínico')
+            }} />}
             {page === 'Habitaciones y Camas' && <RoomsPage />}
             {page === 'Turnos del Personal' && <StaffShiftsPage />}
             {page === 'Inventario y Recursos' && <InventoryPage />}

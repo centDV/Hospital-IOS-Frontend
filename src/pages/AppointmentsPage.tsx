@@ -66,7 +66,7 @@ function statusLabel(status: string): string {
   return labels[status] ?? status.replaceAll('_', ' ')
 }
 
-export function AppointmentsPage() {
+export function AppointmentsPage({ onViewChart }: { onViewChart: (patientId: string) => void }) {
   const { facilities, loading: facilitiesLoading, error: facilitiesError } = useFacilities()
   const [access, setAccess] = useState<UserAccess | null>(null)
   const [accessError, setAccessError] = useState('')
@@ -201,7 +201,7 @@ export function AppointmentsPage() {
       return
     }
     let active = true
-    readDoctorAvailability(scheduleForm.physicianId, scheduleForm.date).then((blocks) => {
+    readDoctorAvailability(facilityId, scheduleForm.physicianId, scheduleForm.date).then((blocks) => {
       if (active) setAvailability(blocks)
     }).catch((loadError: unknown) => {
       if (active) setScheduleError(loadError instanceof Error ? loadError.message : 'No se pudo consultar la disponibilidad del médico.')
@@ -341,7 +341,7 @@ export function AppointmentsPage() {
           {agenda.length === 0 ? <p className="py-6 text-center text-xs text-slate-500">No tienes citas asignadas para esta fecha.</p> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[650px] text-left text-xs">
-                <thead><tr className="border-b border-slate-100 text-slate-500"><th className="pb-3 font-medium">Hora</th><th className="pb-3 font-medium">Paciente</th><th className="pb-3 font-medium">Expediente</th><th className="pb-3 font-medium">Teléfono</th><th className="pb-3 font-medium">Estado</th></tr></thead>
+                <thead><tr className="border-b border-slate-100 text-slate-500"><th className="pb-3 font-medium">Hora</th><th className="pb-3 font-medium">Paciente</th><th className="pb-3 font-medium">Expediente</th><th className="pb-3 font-medium">Teléfono</th><th className="pb-3 font-medium">Estado</th><th className="pb-3 font-medium">Expediente clínico</th></tr></thead>
                 <tbody className="divide-y divide-slate-50">
                   {agenda.map((appointment) => {
                     const time = periodValues(appointment.period)
@@ -351,6 +351,7 @@ export function AppointmentsPage() {
                       <td className="py-3 text-slate-500">{appointment.recordNumber}</td>
                       <td className="py-3 text-slate-500">{appointment.phone || 'No registrado'}</td>
                       <td className="py-3 text-slate-600">{statusLabel(appointment.status)}</td>
+                      <td className="py-3"><button className="font-medium text-[#870b30] hover:underline" onClick={() => onViewChart(appointment.patientId)} type="button">Ver expediente</button></td>
                     </tr>
                   })}
                 </tbody>
